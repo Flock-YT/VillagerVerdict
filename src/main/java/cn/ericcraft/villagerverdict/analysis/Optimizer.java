@@ -9,7 +9,7 @@ import java.util.stream.*;
 
 /** Deterministic greedy multicover with a reverse redundancy pass; never claims optimality. */
 public final class Optimizer {
-  private record Demand(String id, Trade trade, TargetTrade target, int count) {}
+  private record Demand(String id, Trade trade, TargetTrade target, int count, boolean priceGuarantee) {}
 
   public AnalysisResult analyze(
       Collection<VillagerRecord> input,
@@ -36,7 +36,7 @@ public final class Optimizer {
                     t.output().name() + t.output().enchantments() + " / " + t.baseInput().item(),
                     t,
                     null,
-                    backups));
+                    backups, false));
         }
     } else
       for (TargetTrade t : targets) {
@@ -58,16 +58,29 @@ public final class Optimizer {
                     t.id() + "|" + a.output().name() + a.output().enchantments(),
                     a,
                     t,
-                    t.backups()));
-        if (matches.isEmpty()) demands.add(new Demand(t.id(), null, t, t.backups()));
+                    t.backups(), false));
+        if (matches.isEmpty()) demands.add(new Demand(t.id(), null, t, t.backups(), false));
       }
+    // Commodity backups may cost more, but at least one retained trader must preserve
+    // each nondominated price vector. Use the same replacement rule as the verdict pass.
+    var relevant = all.stream()
+        .filter(t -> targets.isEmpty() || targets.stream().anyMatch(target -> target.matches(t)))
+        .toList();
+    var priceDemands = new ArrayList<Demand>();
+    for (var t : relevant) {
+      if (relevant.stream().anyMatch(a -> replaces(a, t) && !replaces(t, a))) continue;
+      if (priceDemands.stream().anyMatch(d -> replaces(d.trade, t) && replaces(t, d.trade))) continue;
+      priceDemands.add(new Demand("best price: " + t.output().name() + t.output().enchantments(),
+          t, null, 1, true));
+    }
+    demands.addAll(priceDemands);
     var covers = new LinkedHashMap<UUID, Set<Integer>>();
     for (var v : known) {
       var set = new LinkedHashSet<Integer>();
       for (int i = 0; i < demands.size(); i++) {
         var d = demands.get(i);
         if (d.trade != null
-            && v.snapshot().trades().stream().anyMatch(a -> coversValue(a, d.trade))) set.add(i);
+            && v.snapshot().trades().stream().anyMatch(a -> d.priceGuarantee ? replaces(a, d.trade) : coversValue(a, d.trade))) set.add(i);
       }
       covers.put(v.uuid(), set);
     }
@@ -196,9 +209,11 @@ public final class Optimizer {
               ? "coverage / unique value"
               : status == Status.REDUNDANT
                   ? "all known trades have replacements"
-                  : "stale, unavailable replacement or coverage gap";
+                  : stale ? "cached trades expired"
+                  : unique > 0 ? "known trades lack retained replacements"
+                  : "replacement unloaded or expired";
       if (v.manual() == VillagerRecord.Manual.REMOVE) reason = "manual exclusion; " + reason;
-      if (confidence == Confidence.LOW) reason += "; unknown future trades";
+      if (v.snapshot().completeness() != TradeSnapshot.Completeness.CURRENT) reason += "; unknown future trades";
       verdicts.put(
           v.uuid(),
           new Verdict(

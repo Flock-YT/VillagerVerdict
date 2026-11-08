@@ -70,6 +70,37 @@ public class ClientIntegrationTest implements FabricClientGameTest {
               throw new AssertionError("default enabled");
           });
       c.waitTicks(45);
+      server.runCommand("item replace entity @p weapon.mainhand with minecraft:diamond_sword");
+      server.runCommand("item replace entity @p weapon.offhand with minecraft:shield");
+      connection.waitForClientboundPackets();
+      c.waitFor(mc -> mc.player.getMainHandItem().is(Items.DIAMOND_SWORD)
+          && mc.player.getOffhandItem().is(Items.SHIELD));
+      c.runOnClient(mc -> {
+        if (VerdictService.INSTANCE.record(id).snapshot() != null)
+          throw new AssertionError("disabled captured automatically");
+        mc.gui.setScreen(null);
+        VerdictService.INSTANCE.enable(true);
+      });
+      c.waitFor(mc -> VerdictService.INSTANCE.record(id).snapshot() != null, 600);
+      c.waitFor(mc -> mc.player.containerMenu == mc.player.inventoryMenu, 200);
+      c.runOnClient(mc -> {
+        var service = VerdictService.INSTANCE;
+        if (mc.gui.screen() != null) throw new AssertionError("fresh automatic screen leaked");
+        service.enable(false);
+        if (!mc.player.getMainHandItem().is(Items.DIAMOND_SWORD)
+            || !mc.player.getOffhandItem().is(Items.SHIELD))
+          throw new AssertionError("automatic probe changed held item");
+        var r = service.record(id);
+        service.edit(new VillagerRecord(r.world(), r.uuid(), r.profession(), r.level(), r.baby(),
+            r.x(), r.y(), r.z(), r.lastSeen(), null, r.manual(), r.note(), r.tags()));
+        service.probe.reset();
+      });
+      connection.waitForServerboundPackets();
+      server.runCommand("item replace entity @p weapon.mainhand with minecraft:air");
+      server.runCommand("item replace entity @p weapon.offhand with minecraft:air");
+      connection.waitForClientboundPackets();
+      c.waitFor(mc -> mc.player.getMainHandItem().isEmpty() && mc.player.getOffhandItem().isEmpty());
+      System.out.println("VV_FRESH_AUTO_PROBE_PASS captured with both hands occupied before any manual interaction");
       c.runOnClient(
           mc -> {
             if (VerdictService.INSTANCE.record(id).snapshot() != null)
@@ -178,6 +209,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
           mc -> {
             mc.gui.setScreen(null);
           });
+      testFastHeldItemProbes(c, server, connection);
       server.runCommand("setblock 0 -60 1 minecraft:chest");
       c.waitTick();
       connection.waitForClientboundPackets();
@@ -260,7 +292,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         service.settings(new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(),
             s.green(), s.yellow(), s.red(), 48, s.scanTicks(), false,
             1, 1, s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(), s.backups(),
-            s.notifications(), s.autoServers(), s.acknowledged(), s.dataset()));
+            s.notifications(), s.autoServers(), s.acknowledged(), s.dataset(), s.excludedProfessions()));
         service.scan();
         service.analysis = AnalysisResult.empty();
         service.tick();
@@ -939,7 +971,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       service.settings(new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(),
           s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), false,
           s.markerLimit(), s.textRange(), s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(),
-          s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), s.dataset()));
+          s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), s.dataset(), s.excludedProfessions()));
     });
     UUID worker = server.computeOnServer(s -> {
       var v = new Villager(EntityTypes.VILLAGER, s.overworld());
@@ -1023,10 +1055,92 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     return lines == null ? List.of() : lines.stream().map(net.minecraft.network.chat.Component::getString).toList();
   }
 
+  private void testProfessionFilter(ClientGameTestContext c, UUID librarian, UUID armorer) {
+    var original = c.computeOnClient(mc -> VerdictService.INSTANCE.settings);
+    var snapshot = c.computeOnClient(mc -> VerdictService.INSTANCE.record(armorer).snapshot());
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.probe.reset();
+      service.manual(mc.level.getEntity(armorer));
+      if (service.probe.context() == null) throw new AssertionError("no active probe for filter test");
+      service.selected = armorer;
+      service.analyze();
+      service.settings(original.withExcludedProfessions(Set.of("minecraft:armorer")));
+      service.tick();
+      if (service.probe.context() != null || service.selected != null
+          || service.markers.containsKey(armorer) || service.nearby.contains(armorer))
+        throw new AssertionError("disabled profession retained live state");
+      if (!snapshot.equals(service.record(armorer).snapshot()))
+        throw new AssertionError("profession filter deleted cached trades");
+      service.manual(mc.level.getEntity(armorer));
+      if (service.probe.context() != null) throw new AssertionError("disabled manual capture started");
+      service.navigateNext();
+      if (armorer.equals(service.selected)) throw new AssertionError("navigation selected disabled worker");
+    });
+    c.waitFor(mc -> VerdictService.INSTANCE.analysis.verdicts().containsKey(librarian)
+        && !VerdictService.INSTANCE.analysis.verdicts().containsKey(armorer));
+    c.waitTicks(25);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (service.markers.containsKey(armorer) || service.analysis.verdicts().containsKey(armorer))
+        throw new AssertionError("old asynchronous analysis restored disabled profession");
+      long expected = service.records().stream().filter(service::enabled).filter(v -> service.isLoaded(v.uuid())).count();
+      if (service.stats().values().stream().mapToLong(Long::longValue).sum() != expected)
+        throw new AssertionError("disabled profession counted in stats");
+      SettingsScreen.open(null);
+    });
+    c.clickScreenButton("vv.professions");
+    c.runOnClient(mc -> mc.gui.toastManager().clear());
+    c.takeScreenshot("profession-filter-zh");
+    c.clickScreenButton("vv.selectNone");
+    c.clickScreenButton("vv.save");
+    c.clickScreenButton("gui.cancel");
+    c.runOnClient(mc -> {
+      if (VerdictService.INSTANCE.settings.excludedProfessions().size() != 1)
+        throw new AssertionError("cancelled settings saved profession draft");
+      SettingsScreen.open(null);
+    });
+    c.clickScreenButton("vv.professions");
+    c.clickScreenButton("vv.selectAll");
+    c.clickScreenButton("vv.selectNone");
+    c.clickScreenButton("vv.save");
+    c.clickScreenButton("vv.save");
+    c.waitFor(mc -> VerdictService.INSTANCE.analysis.verdicts().isEmpty()
+        && VerdictService.INSTANCE.markers.isEmpty() && VerdictService.INSTANCE.nearby.isEmpty());
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (service.stats().values().stream().anyMatch(count -> count != 0L))
+        throw new AssertionError("all-disabled professions counted in stats");
+      if (!snapshot.equals(service.record(armorer).snapshot()))
+        throw new AssertionError("all-disabled professions lost cache");
+      var stale = new TradeSnapshot(snapshot.trades(), snapshot.level(),
+          System.currentTimeMillis() - original.cacheMillis() - 1000, snapshot.completeness());
+      service.edit(service.record(armorer).withSnapshot(stale));
+      service.probe.run();
+    });
+    c.waitTicks(30);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (service.probe.context() != null || !service.record(armorer).snapshot()
+          .stale(System.currentTimeMillis(), original.cacheMillis()))
+        throw new AssertionError("disabled worker was automatically probed");
+      service.pause();
+      service.edit(service.record(armorer).withSnapshot(snapshot));
+      service.settings(original);
+    });
+    c.waitFor(mc -> VerdictService.INSTANCE.analysis.verdicts().containsKey(armorer)
+        && VerdictService.INSTANCE.markers.containsKey(armorer));
+    c.runOnClient(mc -> {
+      if (!snapshot.equals(VerdictService.INSTANCE.record(armorer).snapshot()))
+        throw new AssertionError("re-enabling discarded fresh cache");
+    });
+    System.out.println("VV_PROFESSION_FILTER_PASS cancellation, stale analysis, stats, UI draft, all-disabled, cached re-enable");
+  }
+
   private Settings markerSettings(Settings s, boolean markers, boolean status, boolean summary) {
     return new Settings(s.version(), markers, status, summary, s.green(), s.yellow(), s.red(),
         s.radius(), s.scanTicks(), s.autoScan(), s.markerLimit(), s.textRange(), s.cacheMillis(),
-        s.intervalMillis(), s.timeoutMillis(), s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), s.dataset());
+        s.intervalMillis(), s.timeoutMillis(), s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), s.dataset(), s.excludedProfessions());
   }
 
   private void testMultilineMarkers(ClientGameTestContext c, TestServerContext server, TestServerConnection connection) {
@@ -1070,6 +1184,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.runOnClient(mc -> VerdictService.INSTANCE.scan());
     captureTrades(c, librarian);
     captureTrades(c, armorer);
+    testProfessionFilter(c, librarian, armorer);
     c.runOnClient(mc -> {
       var service = VerdictService.INSTANCE;
       service.edit(service.record(librarian).withManual(VillagerRecord.Manual.PROTECT, "", Set.of()));
@@ -1195,7 +1310,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       service.settings(new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(),
           s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), false, s.markerLimit(),
           s.textRange(), s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(), s.backups(),
-          s.notifications(), s.autoServers(), s.acknowledged(), s.dataset()));
+          s.notifications(), s.autoServers(), s.acknowledged(), s.dataset(), s.excludedProfessions()));
     });
     server.runOnServer(s -> setProfession((Villager) s.overworld().getEntity(librarian), VillagerProfession.FARMER));
     c.waitFor(mc -> ((Villager) mc.level.getEntity(librarian)).getVillagerData().profession().is(VillagerProfession.FARMER));
@@ -1397,10 +1512,80 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     System.out.println("VV_WORKER_FILTER_OUTLINE_PASS eligibility, profession transitions, snapshots, master switch, vanilla glow, wall");
   }
 
+  private void testFastHeldItemProbes(ClientGameTestContext c, TestServerContext server,
+      TestServerConnection connection) {
+    var original = c.computeOnClient(mc -> VerdictService.INSTANCE.settings);
+    c.runOnClient(mc -> {
+      var s = original;
+      VerdictService.INSTANCE.settings(new Settings(s.version(), s.markers(), s.statusMarks(),
+          s.summaries(), s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), false,
+          s.markerLimit(), s.textRange(), s.cacheMillis(), 100, s.timeoutMillis(), s.backups(),
+          s.notifications(), s.autoServers(), s.acknowledged(), s.dataset(), s.excludedProfessions()));
+      VerdictService.INSTANCE.probe.reset();
+    });
+    server.runCommand("item replace entity @p weapon.mainhand with minecraft:name_tag[minecraft:custom_name='\"Do not apply\"']");
+    server.runCommand("item replace entity @p weapon.offhand with minecraft:villager_spawn_egg");
+    connection.waitForClientboundPackets();
+    c.waitFor(mc -> mc.player.getMainHandItem().is(Items.NAME_TAG)
+        && mc.player.getOffhandItem().is(Items.VILLAGER_SPAWN_EGG));
+    var ids = server.computeOnServer(s -> {
+      var result = new ArrayList<UUID>();
+      for (int i = 0; i < 3; i++) {
+        var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+        v.setNoAi(true);
+        v.setPos(1 + i * .5, -60, 0);
+        setProfession(v, VillagerProfession.LIBRARIAN);
+        var offers = new MerchantOffers();
+        offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 5 + i),
+            new ItemStack(Items.BOOK), 12, 1, 0));
+        v.setOffers(offers);
+        s.overworld().addFreshEntity(v);
+        result.add(v.getUUID());
+      }
+      return result;
+    });
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) != null));
+    c.runOnClient(mc -> VerdictService.INSTANCE.enable(true));
+    c.waitTicks(5);
+    c.runOnClient(mc -> {
+      if (VerdictService.INSTANCE.probe.context() != null
+          || ids.stream().anyMatch(id -> VerdictService.INSTANCE.record(id) != null))
+        throw new AssertionError("special items initiated automatic interaction");
+    });
+    server.runCommand("item replace entity @p weapon.offhand with minecraft:shield");
+    connection.waitForClientboundPackets();
+    c.waitFor(mc -> ids.stream().allMatch(id -> VerdictService.INSTANCE.record(id) != null
+        && VerdictService.INSTANCE.record(id).snapshot() != null), 400);
+    c.waitFor(mc -> mc.player.containerMenu == mc.player.inventoryMenu);
+    c.runOnClient(mc -> {
+      if (mc.gui.screen() != null || !mc.player.getMainHandItem().is(Items.NAME_TAG)
+          || !mc.player.getOffhandItem().is(Items.SHIELD))
+        throw new AssertionError("offhand probing changed screen or held items");
+      VerdictService.INSTANCE.enable(false);
+      VerdictService.INSTANCE.settings(original);
+    });
+    connection.waitForServerboundPackets();
+    server.runOnServer(s -> {
+      for (int i = 0; i < ids.size(); i++) {
+        var v = (Villager) s.overworld().getEntity(ids.get(i));
+        if (v.hasCustomName() || v.getOffers().getFirst().getUses() != 0)
+          throw new AssertionError("probe used item or traded");
+        setProfession(v, VillagerProfession.NONE);
+      }
+    });
+    c.waitFor(mc -> ids.stream().noneMatch(id -> VerdictService.INSTANCE.record(id) != null));
+    server.runOnServer(s -> ids.forEach(id -> s.overworld().getEntity(id).discard()));
+    c.waitFor(mc -> ids.stream().noneMatch(id -> mc.level.getEntity(id) != null));
+    server.runCommand("item replace entity @p weapon.mainhand with minecraft:air");
+    server.runCommand("item replace entity @p weapon.offhand with minecraft:air");
+    connection.waitForClientboundPackets();
+    System.out.println("VV_FAST_HELD_PROBE_PASS three fresh workers without scans, offhand fallback, no item use or trades");
+  }
+
   private Settings withDataset(Settings s, String dataset) {
     return new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(), s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), s.autoScan(),
         s.markerLimit(), s.textRange(), s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(),
-        s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), dataset);
+        s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), dataset, s.excludedProfessions());
   }
 
   /** Test-only barrier makes the transition happen while disk clearing is still queued. */

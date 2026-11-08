@@ -23,6 +23,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.inventory.MerchantMenu;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.SpawnEggItem;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.*;
@@ -124,6 +126,26 @@ public final class VerdictService {
     return VillagerRecord.tradable(v.isBaby(), v.getVillagerData().profession().getRegisteredName());
   }
 
+  public boolean enabled(VillagerRecord record) {
+    if (!record.tradable() || !settings.professionEnabled(record.profession())) return false;
+    var villager = loaded.get(record.uuid());
+    return villager == null || enabled(villager)
+        && record.profession().equals(villager.getVillagerData().profession().getRegisteredName());
+  }
+
+  private boolean enabled(Villager villager) {
+    return eligible(villager)
+        && settings.professionEnabled(villager.getVillagerData().profession().getRegisteredName());
+  }
+
+  public DisplayStatus displayStatus(VillagerRecord record, AnalysisResult.Verdict verdict) {
+    var status = verdict == null ? null : verdict.status();
+    if (status == AnalysisResult.Status.REDUNDANT
+        && verdict.replacements().stream().anyMatch(r -> !canConfirm(r)))
+      status = AnalysisResult.Status.REVIEW;
+    return DisplayStatus.resolve(record, status, System.currentTimeMillis(), settings.cacheMillis());
+  }
+
   private void removeIneligibleRecords() {
     var removed = new HashSet<UUID>();
     for (var v : loaded.values()) {
@@ -191,9 +213,7 @@ public final class VerdictService {
     if (probe.context() != null && !validContext()) cancel(State.CANCELLED);
     if (probe.context() != null
         && probe.context().mode() == Mode.AUTOMATIC
-        && (mc.player.isShiftKeyDown()
-            || !mc.player.getMainHandItem().isEmpty()
-            || !mc.player.getOffhandItem().isEmpty())) cancel(State.CONFLICT);
+        && mc.player.isShiftKeyDown()) cancel(State.CONFLICT);
     if (++ticks % settings.scanTicks() == 0 && settings.autoScan()) scan();
 
     if (dirty && !analysisInFlight) {
@@ -218,15 +238,20 @@ public final class VerdictService {
         cancel(State.CONFLICT);
       }
     }
-    if (probe.running() && safeBaseline())
+    if (probe.running() && probe.context() == null && safeBaseline())
       for (var v :
           loaded.values().stream()
               .sorted(Comparator.comparingDouble(v -> v.distanceToSqr(mc.player)))
               .toList()) {
+        if (!enabled(v)) continue;
         var r = records.get(v.getUUID());
-        if (!eligible(v)
-            || r == null
-            || !r.tradable()
+        // Newly loaded workers must not wait for the periodic metadata scan.
+        if (r == null || r.level() != v.getVillagerData().level()
+            || !r.profession().equals(v.getVillagerData().profession().getRegisteredName())) {
+          refreshRecord(v, System.currentTimeMillis());
+          r = records.get(v.getUUID());
+        }
+        if (!r.tradable()
             || r.snapshot() != null
                 && !snapshotStale(r, System.currentTimeMillis())
             || !probe.eligible(v.getUUID())) continue;
@@ -238,7 +263,7 @@ public final class VerdictService {
           try {
             var result =
                 mc.gameMode.interact(
-                    mc.player, v, new EntityHitResult(v, point), InteractionHand.MAIN_HAND);
+                    mc.player, v, new EntityHitResult(v, point), probeHand());
             if (result == net.minecraft.world.InteractionResult.FAIL) probe.rejected();
           } finally {
             autoDispatch = false;
@@ -444,7 +469,7 @@ public final class VerdictService {
     long now = System.currentTimeMillis();
     var near = new LinkedHashSet<UUID>();
     for (var v : loaded.values()) {
-      if (!eligible(v)) continue;
+      if (!enabled(v)) continue;
       if (probe.context() != null && probe.context().uuid().equals(v.getUUID()) && !validContext())
         cancel(State.CANCELLED);
       refreshRecord(v, now);
@@ -488,7 +513,17 @@ public final class VerdictService {
   }
 
   public void settings(Settings s) {
+    boolean professionsChanged = !settings.excludedProfessions().equals(s.excludedProfessions());
     settings = s;
+    if (professionsChanged) {
+      analysisRevision++;
+      analysis = AnalysisResult.empty();
+      regional = Map.of();
+      markers = Map.of();
+      if (selected != null && records.containsKey(selected) && !enabled(records.get(selected))) selected = null;
+      if (probe.context() != null && !validContext()) cancel(State.CANCELLED);
+      scan();
+    }
     probe.configure(s.intervalMillis(), s.timeoutMillis());
     store.save(root.resolve("settings.json"), s);
     dirty = true;
@@ -512,7 +547,7 @@ public final class VerdictService {
     analysisInFlight = true;
     long request = ++analysisRevision;
     long epoch = generation;
-    var input = List.copyOf(records.values());
+    var input = records.values().stream().filter(this::enabled).toList();
     var targetCopy = List.copyOf(targets);
     var regionCopy = List.copyOf(regions);
     var active = Set.copyOf(loaded.keySet());
@@ -569,7 +604,7 @@ public final class VerdictService {
       cancel(State.CONFLICT);
       return;
     }
-    if (ready && !clearingCurrentWorld() && entity instanceof Villager v && eligible(v)
+    if (ready && !clearingCurrentWorld() && entity instanceof Villager v && enabled(v)
         && probe.begin(generation, identity.dimension(), v.getUUID(), v.getId(), Mode.MANUAL)) {
       // An interaction can precede the next scan, including when automatic scanning is disabled.
       refreshRecord(v, System.currentTimeMillis());
@@ -694,7 +729,7 @@ public final class VerdictService {
         || !c.dimension().equals(identity.dimension())) return false;
     var v = loaded.get(c.uuid());
     var record = records.get(c.uuid());
-    return v != null && v.getId() == c.entityId() && v.isAlive() && eligible(v)
+    return v != null && v.getId() == c.entityId() && v.isAlive() && enabled(v)
         && (record == null
             || record.profession().equals(v.getVillagerData().profession().getRegisteredName()));
   }
@@ -719,9 +754,18 @@ public final class VerdictService {
         && mc.gui.screen() == null
         && mc.player.containerMenu == mc.player.inventoryMenu
         && mc.player.containerMenu.getCarried().isEmpty()
-        && mc.player.getMainHandItem().isEmpty()
-        && mc.player.getOffhandItem().isEmpty()
+        && probeHand() != null
+        && !mc.player.isUsingItem()
         && !mc.player.isShiftKeyDown();
+  }
+
+  private InteractionHand probeHand() {
+    for (var hand : InteractionHand.values()) {
+      var item = mc.player.getItemInHand(hand);
+      // These items run before trading in Mob.interact and can consume or alter entities.
+      if (!item.is(Items.NAME_TAG) && !(item.getItem() instanceof SpawnEggItem)) return hand;
+    }
+    return null;
   }
 
   private Vec3 hitPoint(Villager v) {
@@ -766,6 +810,7 @@ public final class VerdictService {
     return r.confirmed()
         && loaded.containsKey(r.replacement())
         && v != null
+        && enabled(v)
         && v.snapshot() != null
         && !snapshotStale(v, System.currentTimeMillis());
   }
@@ -789,7 +834,7 @@ public final class VerdictService {
             .filter(
                 v ->
                     loaded.containsKey(v.uuid())
-                        && v.tradable()
+                        && enabled(v)
                         && (v.snapshot() == null
                             || snapshotStale(v, System.currentTimeMillis())))
             .min(Comparator.comparingDouble(this::distanceSquared))
@@ -807,7 +852,7 @@ public final class VerdictService {
     long success = 0, failed = 0, pending = 0, none = 0;
     UUID active = probe.context() == null ? null : probe.context().uuid();
     for (var v : records.values())
-      if (loaded.containsKey(v.uuid())) {
+      if (loaded.containsKey(v.uuid()) && enabled(v)) {
         if (!v.tradable()) none++;
         else if (v.uuid().equals(active)) {
         } else if (probe.failureCount(v.uuid()) > 0) failed++;
@@ -870,7 +915,7 @@ public final class VerdictService {
     var m = new LinkedHashMap<UUID, Marker>();
     for (var v :
         loaded.values().stream()
-            .filter(VerdictService::eligible)
+            .filter(this::enabled)
             .filter(v -> nearby.contains(v.getUUID()))
             .filter(v -> records.containsKey(v.getUUID())
                 && records.get(v.getUUID()).profession().equals(v.getVillagerData().profession().getRegisteredName()))
@@ -880,19 +925,11 @@ public final class VerdictService {
             .toList()) {
       var verdict = analysis.verdicts().get(v.getUUID());
       var record = records.get(v.getUUID());
-      var status = verdict == null ? AnalysisResult.Status.REVIEW : verdict.status();
-      if (record != null
-          && !record.fixed()
-          && (record.snapshot() == null
-              || snapshotStale(record, System.currentTimeMillis())
-              || verdict != null
-                  && status == AnalysisResult.Status.REDUNDANT
-                  && verdict.replacements().stream().anyMatch(r -> !canConfirm(r))))
-        status = AnalysisResult.Status.REVIEW;
+      var status = displayStatus(record, verdict);
       int color =
           switch (status) {
             case KEEP -> settings.green();
-            case REVIEW -> settings.yellow();
+            case PENDING, STALE, ANALYZING, REVIEW -> settings.yellow();
             case REDUNDANT -> settings.red();
           };
       var lines = MarkerText.lines(record, status, settings.statusMarks(), settings.summaries())

@@ -13,6 +13,7 @@ public final class SettingsScreen {
   public static void open(Screen parent) {
     var service = VerdictService.INSTANCE;
     var s = service.settings;
+    var excluded = new HashSet<>(s.excludedProfessions());
     var fields =
         FormScreen.fields(
             "vv.markers",
@@ -74,9 +75,13 @@ public final class SettingsScreen {
                           bool(m, "vv.notifications"),
                           s.autoServers(),
                           s.acknowledged(),
-                          m.get("vv.dataset")));
+                          m.get("vv.dataset"), excluded));
                 },
-                null));
+                null).action("vv.professions", form -> Minecraft.getInstance().gui.setScreen(
+                    new ProfessionScreen(form, excluded, chosen -> {
+                      excluded.clear();
+                      excluded.addAll(chosen);
+                    }))));
   }
 
   private static boolean bool(Map<String, String> m, String k) {
@@ -118,7 +123,7 @@ public final class SettingsScreen {
             s.notifications(),
             s.autoServers(),
             s.acknowledged(),
-            s.dataset()));
+            s.dataset(), s.excludedProfessions()));
   }
 
   public static void toggleProbe() {

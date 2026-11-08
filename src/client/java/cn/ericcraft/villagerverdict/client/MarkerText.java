@@ -13,16 +13,17 @@ public final class MarkerText {
 
     public static List<Component> lines(VillagerRecord record, AnalysisResult.Status status,
         boolean statusMarks, boolean summaries) {
+        return lines(record, DisplayStatus.valueOf(status.name()), statusMarks, summaries);
+    }
+
+    public static List<Component> lines(VillagerRecord record, DisplayStatus status,
+        boolean statusMarks, boolean summaries) {
         var lines = new ArrayList<Component>();
         if (!summaries) {
-            if (statusMarks) lines.add(Component.literal(switch (status) {
-                case KEEP -> "+";
-                case REVIEW -> "?";
-                case REDUNDANT -> "−";
-            }));
+            if (statusMarks) lines.add(Component.literal(status.symbol()));
             return List.copyOf(lines);
         }
-        if (statusMarks) lines.add(Component.translatable("vv.status." + status.name().toLowerCase(Locale.ROOT)));
+        if (statusMarks) lines.add(Component.translatable(status.translationKey()));
         lines.add(Component.translatable("vv.marker.level", record.level()));
         if (record.snapshot() != null) {
             var names = new LinkedHashSet<String>();

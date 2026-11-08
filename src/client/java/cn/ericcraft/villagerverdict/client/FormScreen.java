@@ -14,6 +14,8 @@ public final class FormScreen extends WorldScreen {
   private final Consumer<Map<String, String>> save;
   private final Runnable delete;
   private int offset;
+  private String actionKey;
+  private Consumer<Screen> action;
   private String error = "";
 
   public FormScreen(
@@ -27,6 +29,12 @@ public final class FormScreen extends WorldScreen {
     this.values = values;
     this.save = save;
     this.delete = delete;
+  }
+
+  public FormScreen action(String key, Consumer<Screen> action) {
+    this.actionKey = key;
+    this.action = action;
+    return this;
   }
 
   protected void init() {
@@ -109,6 +117,7 @@ public final class FormScreen extends WorldScreen {
           }
         });
     button("gui.cancel", 98, height - 26, 80, () -> minecraft.gui.setScreen(parent));
+    if (action != null) button(actionKey, 184, height - 26, Math.min(140, width - 196), () -> action.accept(this));
     if (delete != null)
       button(
           "vv.delete",

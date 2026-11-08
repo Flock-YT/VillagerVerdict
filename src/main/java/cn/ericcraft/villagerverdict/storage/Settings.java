@@ -22,10 +22,12 @@ public record Settings(
     boolean notifications,
     Map<String, Boolean> autoServers,
     Set<String> acknowledged,
-    String dataset) {
+    String dataset,
+    Set<String> excludedProfessions) {
   public Settings {
     autoServers = Map.copyOf(autoServers);
     acknowledged = Set.copyOf(acknowledged);
+    excludedProfessions = excludedProfessions == null ? Set.of() : Set.copyOf(excludedProfessions);
     if (version == 1) {
       statusMarks = true;
       version = 2;
@@ -42,7 +44,7 @@ public record Settings(
         || markerLimit > 2048
         || textRange < 1
         || cacheMillis < 1000
-        || intervalMillis < 2000
+        || intervalMillis < 100
         || timeoutMillis < 1000
         || backups < 1) throw new IllegalArgumentException("settings");
   }
@@ -62,13 +64,24 @@ public record Settings(
         128,
         32,
         1800000,
-        2000,
+        100,
         5000,
         1,
         true,
         Map.of(),
         Set.of(),
-        "default");
+        "default",
+        Set.of());
+  }
+
+  public boolean professionEnabled(String profession) {
+    return !excludedProfessions.contains(profession);
+  }
+
+  public Settings withExcludedProfessions(Set<String> excluded) {
+    return new Settings(version, markers, statusMarks, summaries, green, yellow, red, radius,
+        scanTicks, autoScan, markerLimit, textRange, cacheMillis, intervalMillis, timeoutMillis,
+        backups, notifications, autoServers, acknowledged, dataset, excluded);
   }
 
   public Settings auto(String server, boolean enabled, boolean ack) {
@@ -96,6 +109,7 @@ public record Settings(
         notifications,
         m,
         a,
-        dataset);
+        dataset,
+        excludedProfessions);
   }
 }

@@ -19,6 +19,22 @@ class ProbeTest {
   }
 
   @Test
+  void fastIntervalStillSerializesRequestsAndHonorsCooldown() {
+    p.configure(100, 5000);
+    begin();
+    assertFalse(p.eligible(b));
+    assertTrue(p.open(3, true));
+    assertTrue(p.offers(3));
+    p.closing();
+    p.complete(true);
+    time.addAndGet(99);
+    assertFalse(p.eligible(b));
+    time.incrementAndGet();
+    assertFalse(p.eligible(a));
+    assertTrue(p.begin(1, "overworld", b, 6, Mode.AUTOMATIC));
+  }
+
+  @Test
   void disabledSendsNoRequest() {
     assertFalse(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
     assertNull(p.context());

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="cn.ericcraft.villagerverdict.DisplayStatusTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-08T16:40:24.602Z" hostname="Mac-Mini.local" time="0.017">
+  <properties/>
+  <testcase name="professionSelectionSurvivesSerializationAndServerToggle()" classname="cn.ericcraft.villagerverdict.DisplayStatusTest" time="0.016"/>
+  <testcase name="futureLevelsDoNotMeanUnscanned()" classname="cn.ericcraft.villagerverdict.DisplayStatusTest" time="0.0"/>
+  <testcase name="distinguishesPendingFreshReviewAnalysisAndExpired()" classname="cn.ericcraft.villagerverdict.DisplayStatusTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -44,7 +44,7 @@ public final class ProbeController {
   private long nextRequest, quarantine;
   private int timeouts;
   private boolean running;
-  private long interval = 2000, timeout = 5000;
+  private long interval = 100, timeout = 5000;
   private State last = State.IDLE;
 
   public ProbeController(LongSupplier clock) {
@@ -52,7 +52,7 @@ public final class ProbeController {
   }
 
   public void configure(long interval, long timeout) {
-    this.interval = Math.max(2000, interval);
+    this.interval = Math.max(100, interval);
     this.timeout = Math.max(1000, timeout);
   }
 

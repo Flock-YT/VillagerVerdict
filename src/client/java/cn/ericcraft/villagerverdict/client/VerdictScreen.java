@@ -131,7 +131,7 @@ public final class VerdictScreen extends WorldScreen {
         var v = records.get(i);
         var verdict = viewAnalysis().verdicts().get(v.uuid());
         String label =
-            (verdict == null ? "?" : symbol(verdict.status()))
+            s.displayStatus(v, verdict).symbol()
                 + " "
                 + profession(v)
                 + " L"
@@ -142,7 +142,7 @@ public final class VerdictScreen extends WorldScreen {
                 + v.uuid().toString().substring(0, 6);
         var b =
             button(
-                Component.literal(label).withColor(color(verdict)),
+                Component.literal(label).withColor(color(v, verdict)),
                 12,
                 top() + (i - offset) * 25,
                 listWidth(),
@@ -359,6 +359,7 @@ public final class VerdictScreen extends WorldScreen {
   private List<VillagerRecord> filtered() {
     var list =
         s.records().stream()
+            .filter(s::enabled)
             .filter(v -> !nearbyOnly || s.nearby.contains(v.uuid()))
             .filter(
                 v ->
@@ -461,22 +462,12 @@ public final class VerdictScreen extends WorldScreen {
             .getString();
   }
 
-  private String symbol(Status status) {
-    return switch (status) {
-      case KEEP -> "+";
-      case REVIEW -> "?";
-      case REDUNDANT -> "−";
+  private int color(VillagerRecord record, Verdict verdict) {
+    return switch (s.displayStatus(record, verdict)) {
+      case KEEP -> s.settings.green();
+      case REDUNDANT -> s.settings.red();
+      default -> s.settings.yellow();
     };
-  }
-
-  private int color(Verdict verdict) {
-    return verdict == null
-        ? s.settings.yellow()
-        : switch (verdict.status()) {
-          case KEEP -> s.settings.green();
-          case REVIEW -> s.settings.yellow();
-          case REDUNDANT -> s.settings.red();
-        };
   }
 
   public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float delta) {
@@ -515,7 +506,7 @@ public final class VerdictScreen extends WorldScreen {
     var v = s.record(s.selected);
     g.enableScissor(x, y, x + w, y + h);
     g.fill(x, y, x + w, y + h, 0x99303A50);
-    if (v == null) {
+    if (v == null || !s.enabled(v)) {
       g.text(font, Component.translatable("vv.select"), x + 6, y + 6, 0xFFFFFFFF);
       g.disableScissor();
       return;
@@ -543,9 +534,10 @@ public final class VerdictScreen extends WorldScreen {
             .getString());
     lines.add(v.note() + " " + v.tags());
     var verdict = viewAnalysis().verdicts().get(v.uuid());
+    if (verdict == null) lines.add(Component.translatable(s.displayStatus(v, null).translationKey()).getString());
     if (verdict != null) {
       lines.add(
-          Component.translatable("vv.status." + verdict.status().name().toLowerCase(Locale.ROOT))
+          Component.translatable(s.displayStatus(v, verdict).translationKey())
                   .getString()
               + " · "
               + Component.translatable("vv.confidence." + verdict.confidence()).getString());
@@ -674,6 +666,9 @@ public final class VerdictScreen extends WorldScreen {
             .replace(
                 "uninspected or completeness unknown",
                 Component.translatable("vv.reason.uninspected").getString())
+            .replace("cached trades expired", Component.translatable("vv.reason.stale").getString())
+            .replace("known trades lack retained replacements", Component.translatable("vv.reason.gap").getString())
+            .replace("replacement unloaded or expired", Component.translatable("vv.reason.unavailable").getString())
             .replace(
                 "unknown future trades", Component.translatable("vv.reason.unknown").getString())
             .replace("manual exclusion", Component.translatable("vv.reason.excluded").getString());
