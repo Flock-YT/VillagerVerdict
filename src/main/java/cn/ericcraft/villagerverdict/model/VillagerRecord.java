@@ -33,7 +33,11 @@ public record VillagerRecord(
   }
 
   public boolean tradable() {
-    return !baby && !profession.endsWith(":none") && !profession.endsWith(":nitwit");
+    return tradable(baby, profession);
+  }
+
+  public static boolean tradable(boolean baby, String profession) {
+    return !baby && !profession.equals("minecraft:none") && !profession.equals("minecraft:nitwit");
   }
 
   public boolean fixed() {

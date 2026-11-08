@@ -58,7 +58,11 @@ public final class VerdictService {
   public Map<String, AnalysisResult> regional = Map.of();
 
   public record Marker(
-      int color, Component text, boolean visible, boolean summary, String symbol) {}
+      int color, List<Component> lines) {
+    public Marker {
+      lines = List.copyOf(lines);
+    }
+  }
 
   public record StoredWorld(WorldIdentity identity, int villagers, boolean current) {}
 
@@ -116,6 +120,36 @@ public final class VerdictService {
     return ready;
   }
 
+  public static boolean eligible(Villager v) {
+    return VillagerRecord.tradable(v.isBaby(), v.getVillagerData().profession().getRegisteredName());
+  }
+
+  private void removeIneligibleRecords() {
+    var removed = new HashSet<UUID>();
+    for (var v : loaded.values()) {
+      if (!eligible(v)) {
+        var id = v.getUUID();
+        if (probe.context() != null && probe.context().uuid().equals(id)) cancel(State.CANCELLED);
+        if (records.remove(id) != null) removed.add(id);
+      }
+    }
+    if (removed.isEmpty()) return;
+    if (removed.contains(selected)) selected = null;
+    removed.forEach(notifications::remove);
+    nearby = nearby.stream().filter(id -> !removed.contains(id))
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    staleIds = staleIds.stream().filter(id -> !removed.contains(id))
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    var remainingMarkers = new HashMap<>(markers);
+    removed.forEach(remainingMarkers::remove);
+    markers = Map.copyOf(remainingMarkers);
+    analysisRevision++;
+    analysis = AnalysisResult.empty();
+    regional = Map.of();
+    dirty = true;
+    save();
+  }
+
   public void load(Entity e) {
     if (e instanceof Villager v) {
       loaded.put(v.getUUID(), v);
@@ -150,6 +184,7 @@ public final class VerdictService {
     if (mc.level != level || identity != null && !identity.dataset().equals(settings.dataset()))
       switchWorld(dimension);
     if (level == null || !ready || clearingCurrentWorld()) return;
+    removeIneligibleRecords();
     var before = probe.context();
     probe.tick();
     if (before != null && probe.context() == null) restore();
@@ -189,7 +224,8 @@ public final class VerdictService {
               .sorted(Comparator.comparingDouble(v -> v.distanceToSqr(mc.player)))
               .toList()) {
         var r = records.get(v.getUUID());
-        if (r == null
+        if (!eligible(v)
+            || r == null
             || !r.tradable()
             || r.snapshot() != null
                 && !snapshotStale(r, System.currentTimeMillis())
@@ -361,47 +397,57 @@ public final class VerdictService {
     save();
   }
 
-  public void scan() {
-    if (mc.player == null || identity == null || !ready || clearingCurrentWorld()) return;
+  private void refreshRecord(Villager v, long now) {
+    var old = records.get(v.getUUID());
+    var d = v.getVillagerData();
+    boolean professionChanged =
+        old != null && !old.profession().equals(d.profession().getRegisteredName());
+    boolean levelChanged =
+        old == null
+            || old.level() != d.level()
+            || old.snapshot() != null && old.snapshot().level() != d.level();
+    boolean metadataChanged =
+        old == null
+            || levelChanged
+            || !old.profession().equals(d.profession().getRegisteredName())
+            || old.baby() != v.isBaby();
+    boolean positionChanged =
+        old == null
+            || Double.compare(old.x(), v.getX()) != 0
+            || Double.compare(old.y(), v.getY()) != 0
+            || Double.compare(old.z(), v.getZ()) != 0;
+    var current =
+        new VillagerRecord(
+            identity,
+            v.getUUID(),
+            d.profession().getRegisteredName(),
+            d.level(),
+            v.isBaby(),
+            positionChanged ? v.getX() : old.x(),
+            positionChanged ? v.getY() : old.y(),
+            positionChanged ? v.getZ() : old.z(),
+            metadataChanged || positionChanged ? now : old.lastSeen(),
+            old == null || levelChanged || professionChanged ? null : old.snapshot(),
+            old == null ? VillagerRecord.Manual.AUTO : old.manual(),
+            old == null ? "" : old.note(),
+            old == null ? Set.of() : old.tags());
+    if (!current.equals(old)) {
+      records.put(v.getUUID(), current);
+      dirty = true;
+    }
+  }
+
+  public boolean scan() {
+    if (mc.player == null || identity == null || !ready || clearingCurrentWorld()) return false;
     long start = System.nanoTime();
+    removeIneligibleRecords();
     long now = System.currentTimeMillis();
     var near = new LinkedHashSet<UUID>();
     for (var v : loaded.values()) {
-      var old = records.get(v.getUUID());
-      var d = v.getVillagerData();
-      boolean levelChanged =
-          old == null
-              || old.level() != d.level()
-              || old.snapshot() != null && old.snapshot().level() != d.level();
-      boolean metadataChanged =
-          old == null
-              || levelChanged
-              || !old.profession().equals(d.profession().getRegisteredName())
-              || old.baby() != v.isBaby();
-      boolean positionChanged =
-          old == null
-              || Double.compare(old.x(), v.getX()) != 0
-              || Double.compare(old.y(), v.getY()) != 0
-              || Double.compare(old.z(), v.getZ()) != 0;
-      var current =
-          new VillagerRecord(
-              identity,
-              v.getUUID(),
-              d.profession().getRegisteredName(),
-              d.level(),
-              v.isBaby(),
-              positionChanged ? v.getX() : old.x(),
-              positionChanged ? v.getY() : old.y(),
-              positionChanged ? v.getZ() : old.z(),
-              metadataChanged || positionChanged ? now : old.lastSeen(),
-              old == null || levelChanged ? null : old.snapshot(),
-              old == null ? VillagerRecord.Manual.AUTO : old.manual(),
-              old == null ? "" : old.note(),
-              old == null ? Set.of() : old.tags());
-      if (!current.equals(old)) {
-        records.put(v.getUUID(), current);
-        dirty = true;
-      }
+      if (!eligible(v)) continue;
+      if (probe.context() != null && probe.context().uuid().equals(v.getUUID()) && !validContext())
+        cancel(State.CANCELLED);
+      refreshRecord(v, now);
       if (v.distanceToSqr(mc.player) <= settings.radius() * settings.radius())
         near.add(v.getUUID());
     }
@@ -417,6 +463,7 @@ public final class VerdictService {
     }
     save();
     scanNanos = System.nanoTime() - start;
+    return true;
   }
 
   private boolean snapshotStale(VillagerRecord record, long now) {
@@ -522,8 +569,12 @@ public final class VerdictService {
       cancel(State.CONFLICT);
       return;
     }
-    if (ready && !clearingCurrentWorld() && entity instanceof Villager v)
-      probe.begin(generation, identity.dimension(), v.getUUID(), v.getId(), Mode.MANUAL);
+    if (ready && !clearingCurrentWorld() && entity instanceof Villager v && eligible(v)
+        && probe.begin(generation, identity.dimension(), v.getUUID(), v.getId(), Mode.MANUAL)) {
+      // An interaction can precede the next scan, including when automatic scanning is disabled.
+      refreshRecord(v, System.currentTimeMillis());
+      save();
+    }
   }
 
   public void open(int container, boolean merchant) {
@@ -642,7 +693,10 @@ public final class VerdictService {
         || c.generation() != generation
         || !c.dimension().equals(identity.dimension())) return false;
     var v = loaded.get(c.uuid());
-    return v != null && v.getId() == c.entityId() && v.isAlive();
+    var record = records.get(c.uuid());
+    return v != null && v.getId() == c.entityId() && v.isAlive() && eligible(v)
+        && (record == null
+            || record.profession().equals(v.getVillagerData().profession().getRegisteredName()));
   }
 
   private boolean owns(Context c) {
@@ -816,7 +870,10 @@ public final class VerdictService {
     var m = new LinkedHashMap<UUID, Marker>();
     for (var v :
         loaded.values().stream()
+            .filter(VerdictService::eligible)
             .filter(v -> nearby.contains(v.getUUID()))
+            .filter(v -> records.containsKey(v.getUUID())
+                && records.get(v.getUUID()).profession().equals(v.getVillagerData().profession().getRegisteredName()))
             .sorted(
                 Comparator.<Villager>comparingInt(v -> v.getUUID().equals(selected) ? 0 : 1)
                     .thenComparingDouble(v -> v.distanceToSqr(mc.player)))
@@ -838,46 +895,9 @@ public final class VerdictService {
             case REVIEW -> settings.yellow();
             case REDUNDANT -> settings.red();
           };
-      boolean visible = mc.player.hasLineOfSight(v);
-      Component text =
-          (settings.statusMarks()
-                  ? Component.translatable("vv.status." + status.name().toLowerCase(Locale.ROOT))
-                  : Component.literal("L"))
-              .append(" · " + v.getVillagerData().level());
-      var r = records.get(v.getUUID());
-      if (r != null && r.snapshot() != null && !r.snapshot().trades().isEmpty()) {
-        var t =
-            r.snapshot().trades().stream()
-                .max(
-                    Comparator.comparingInt(
-                        a ->
-                            a.output().enchantments().values().stream()
-                                .mapToInt(i -> i)
-                                .max()
-                                .orElse(0)))
-                .orElseThrow();
-        text =
-            text.copy()
-                .append(
-                    " · "
-                        + ItemCodecAdapter.displayName(t.output())
-                        + " "
-                        + t.baseInput().count()
-                        + "/"
-                        + t.actualInput().count());
-      }
-      m.put(
-          v.getUUID(),
-          new Marker(
-              color,
-              text,
-              visible,
-              true,
-              switch (status) {
-                case KEEP -> "+";
-                case REVIEW -> "?";
-                case REDUNDANT -> "−";
-              }));
+      var lines = MarkerText.lines(record, status, settings.statusMarks(), settings.summaries())
+          .stream().map(line -> (Component) line.copy().withColor(color)).toList();
+      m.put(v.getUUID(), new Marker(color, lines));
     }
     markers = Map.copyOf(m);
   }

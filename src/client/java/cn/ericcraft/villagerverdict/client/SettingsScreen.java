@@ -2,6 +2,7 @@ package cn.ericcraft.villagerverdict.client;
 
 import cn.ericcraft.villagerverdict.storage.Settings;
 import java.util.*;
+import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.*;
 import net.minecraft.network.chat.Component;
@@ -20,10 +21,6 @@ public final class SettingsScreen {
             "" + s.statusMarks(),
             "vv.summaries",
             "" + s.summaries(),
-            "vv.outlines",
-            "" + s.outlines(),
-            "vv.throughWalls",
-            "" + s.throughWalls(),
             "vv.green",
             Integer.toHexString(s.green()),
             "vv.yellow",
@@ -62,8 +59,6 @@ public final class SettingsScreen {
                           bool(m, "vv.markers"),
                           bool(m, "vv.statusMarks"),
                           bool(m, "vv.summaries"),
-                          bool(m, "vv.outlines"),
-                          bool(m, "vv.throughWalls"),
                           color(m, "vv.green"),
                           color(m, "vv.yellow"),
                           color(m, "vv.red"),
@@ -108,8 +103,6 @@ public final class SettingsScreen {
             !s.markers(),
             s.statusMarks(),
             s.summaries(),
-            s.outlines(),
-            s.throughWalls(),
             s.green(),
             s.yellow(),
             s.red(),
@@ -129,23 +122,41 @@ public final class SettingsScreen {
   }
 
   public static void toggleProbe() {
+    toggleProbe(message -> {});
+  }
+
+  public static void toggleProbe(Consumer<Component> feedback) {
     var service = VerdictService.INSTANCE;
-    if (service.identity() == null) return;
+    var identity = service.identity();
+    if (identity == null || !service.ready()) {
+      feedback.accept(Component.translatable("vv.feedback.unavailable"));
+      return;
+    }
     if (service.probe.running()) {
       service.pause();
+      feedback.accept(Component.translatable("vv.feedback.probePaused"));
       return;
     }
     var mc = Minecraft.getInstance();
     if (!service.settings.acknowledged().contains(service.identity().server())) {
       Screen parent = mc.gui.screen();
       mc.gui.setScreen(
-          new ConfirmScreen(
+          new WorldConfirmScreen(
               yes -> {
-                if (yes) service.enable(true);
                 mc.gui.setScreen(parent);
+                if (!yes) feedback.accept(Component.translatable("vv.feedback.probeCancelled"));
+                else if (!service.ready() || !identity.equals(service.identity()))
+                  feedback.accept(Component.translatable("vv.feedback.unavailable"));
+                else {
+                  service.enable(true);
+                  feedback.accept(Component.translatable("vv.feedback.probeOn"));
+                }
               },
               Component.translatable("vv.probe"),
               Component.translatable("vv.probeExplanation")));
-    } else service.enable(true);
+    } else {
+      service.enable(true);
+      feedback.accept(Component.translatable("vv.feedback.probeOn"));
+    }
   }
 }

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" tests="48" skipped="0" failures="0" errors="0" timestamp="2026-11-08T16:06:22.209Z" hostname="Mac-Mini.local" time="0.037">
+  <properties/>
+  <testcase name="expandsMultiEnchantmentBooksInDeterministicOrder()" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="unknownProfessionsAndEmptyTradesHaveNoHighlights()" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="mergesEnchantmentsAtHighestKnownLevelWithoutChangingFirstAppearanceOrder()" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="[1] armorer, diamond_helmet" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.003"/>
+  <testcase name="[2] armorer, diamond_chestplate" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[3] armorer, diamond_leggings" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[4] armorer, diamond_boots" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="[5] weaponsmith, diamond_sword" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[6] weaponsmith, diamond_axe" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[7] toolsmith, diamond_pickaxe" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[8] toolsmith, diamond_axe" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="[9] toolsmith, diamond_shovel" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[10] toolsmith, diamond_hoe" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[11] fletcher, tipped_arrow" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="[12] farmer, golden_carrot" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[13] farmer, glistering_melon_slice" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[14] cleric, ender_pearl" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="[15] cleric, experience_bottle" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[16] cartographer, filled_map" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[17] leatherworker, saddle" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="[18] leatherworker, leather_horse_armor" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[19] mason, quartz_block" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[20] mason, quartz_pillar" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="[21] mason, blue_glazed_terracotta" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[22] shepherd, blue_banner" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[23] shepherd, painting" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="[24] butcher, cooked_chicken" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[25] butcher, cooked_porkchop" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[1] librarian, bookshelf" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[2] librarian, red_candle" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[3] armorer, iron_leggings" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[4] weaponsmith, iron_sword" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[5] toolsmith, stone_pickaxe" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[6] fletcher, arrow" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[7] fisherman, cooked_cod" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[8] farmer, bread" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[9] cleric, redstone" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="[10] cartographer, map" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[11] leatherworker, leather_helmet" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[12] mason, blue_terracotta" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[13] shepherd, blue_wool" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[14] butcher, rabbit_stew" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[1] fletcher, bow" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[2] fletcher, crossbow" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="[3] fisherman, fishing_rod" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <testcase name="mergesEquipmentWithDifferentEnchantmentsAndPreservesOutputOrder()" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="keepsDifferentMapDestinationsAndPotionEffects()" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.001"/>
+  <testcase name="ignoresSignatureItemsInTradeInputs()" classname="cn.ericcraft.villagerverdict.ProfessionHighlightsTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

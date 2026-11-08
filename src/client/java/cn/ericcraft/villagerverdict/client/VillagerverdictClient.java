@@ -66,11 +66,11 @@ public final class VillagerverdictClient implements ClientModInitializer {
           s.tick();
           while (open.consumeClick())
             if (mc.gui.screen() == null) mc.gui.setScreen(new VerdictScreen());
-          boolean internal = shortcutManager.editable() && mc.gui.screen() == null;
-          while (scan.consumeClick()) if (internal) s.scan();
-          while (mark.consumeClick()) if (internal) SettingsScreen.toggleMarkers();
-          while (next.consumeClick()) if (internal) s.navigateNext();
-          while (probe.consumeClick()) if (internal) SettingsScreen.toggleProbe();
+          boolean internal = shortcutManager.editable() && mc.player != null && mc.gui.screen() == null;
+          while (scan.consumeClick()) if (internal) ShortcutActions.scan();
+          while (mark.consumeClick()) if (internal) ShortcutActions.toggleMarkers();
+          while (next.consumeClick()) if (internal) ShortcutActions.navigateNext();
+          while (probe.consumeClick()) if (internal) ShortcutActions.toggleProbe();
         });
     ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> {
       shortcutManager.close();

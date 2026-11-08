@@ -8,7 +8,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 /** Keyboard-accessible native EditBoxes; scrolling retains unsaved values. */
-public final class FormScreen extends Screen {
+public final class FormScreen extends WorldScreen {
   private final Screen parent;
   private final LinkedHashMap<String, String> values;
   private final Consumer<Map<String, String>> save;
@@ -127,10 +127,13 @@ public final class FormScreen extends Screen {
   }
 
   public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float d) {
-    g.fill(0, 0, width, height, 0xF0181E2B);
     g.centeredText(font, title, width / 2, 10, 0xFFFFFFFF);
     int visible = Math.max(1, (height - 90) / 42);
     var keys = new ArrayList<>(values.keySet());
+    int x = Math.max(12, width / 2 - 145);
+    int rows = Math.min(visible, keys.size() - offset);
+    if (rows > 0) g.fill(x - 4, 30, x + Math.min(290, width - 24) + 4,
+        30 + (rows - 1) * 42 + 42, 0x99303A50);
     for (int i = offset; i < Math.min(keys.size(), offset + visible); i++)
       g.text(
           font,
@@ -161,10 +164,6 @@ public final class FormScreen extends Screen {
 
   public void onClose() {
     minecraft.gui.setScreen(parent);
-  }
-
-  public boolean isPauseScreen() {
-    return false;
   }
 
   public static LinkedHashMap<String, String> fields(String... pairs) {

@@ -6,13 +6,12 @@ import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
-import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 
 /** Lists persisted worlds and clears villager records without removing configuration. */
-public final class DataScreen extends Screen {
+public final class DataScreen extends WorldScreen {
     private final Screen parent;
     private final VerdictService service = VerdictService.INSTANCE;
     private List<VerdictService.StoredWorld> worlds = List.of();
@@ -93,7 +92,7 @@ public final class DataScreen extends Screen {
     private void confirm(boolean server) {
         if (busy || selected == null) return;
         WorldIdentity identity = selected;
-        minecraft.gui.setScreen(new ConfirmScreen(yes -> {
+        minecraft.gui.setScreen(new WorldConfirmScreen(yes -> {
             if (!yes) {
                 minecraft.gui.setScreen(this);
                 return;
@@ -133,7 +132,6 @@ public final class DataScreen extends Screen {
     }
 
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
-        graphics.fill(0, 0, width, height, 0xF0181E2B);
         graphics.centeredText(font, title, width / 2, 10, 0xFFFFFFFF);
         super.extractRenderState(graphics, mouseX, mouseY, delta);
         for (int i = offset; i < Math.min(worlds.size(), offset + rows()); i++) {
@@ -168,9 +166,5 @@ public final class DataScreen extends Screen {
 
     public void onClose() {
         minecraft.gui.setScreen(parent);
-    }
-
-    public boolean isPauseScreen() {
-        return false;
     }
 }

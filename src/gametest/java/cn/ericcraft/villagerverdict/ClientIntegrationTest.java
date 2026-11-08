@@ -38,6 +38,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
           });
       server.runCommand("tp @p 0 -60 0");
       testShortcuts(c);
+      testShortcutFeedback(c, server);
       UUID id =
           server.computeOnServer(
               s -> {
@@ -108,6 +109,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
             mc.gui.setScreen(new VerdictScreen());
           });
       c.takeScreenshot("wide-management");
+      testTransparentScreens(c, server, "en");
       var reload =
           c.computeOnClient(
               mc -> {
@@ -120,6 +122,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       testNativeBindings(c, "zh");
       c.setScreen(VerdictScreen::new);
       c.takeScreenshot("management-zh");
+      testTransparentScreens(c, server, "zh");
       c.runOnClient(
           mc -> {
             mc.options.guiScale().set(2);
@@ -198,11 +201,15 @@ public class ClientIntegrationTest implements FabricClientGameTest {
             var v = (Villager) s.overworld().getEntity(id);
             if (v.getOffers().getFirst().getUses() != 0) throw new AssertionError("mod traded");
           });
+      testManualCaptureAfterProfessionChange(c, server, connection, id);
+      testEligibilityAndOutlines(c, server, connection, id);
+      testMultilineMarkers(c, server, connection);
       server.runOnServer(
           s -> {
             for (int i = 0; i < 300; i++) {
               var v = new Villager(EntityTypes.VILLAGER, s.overworld());
               v.setNoAi(true);
+              setProfession(v, VillagerProfession.LIBRARIAN);
               v.setPos(5 + i % 20, -60, 5 + i / 20);
               s.overworld().addFreshEntity(v);
             }
@@ -214,10 +221,10 @@ public class ClientIntegrationTest implements FabricClientGameTest {
           mc -> {
             var service = VerdictService.INSTANCE;
             service.scan();
-            if (service.stats().get("nontrading") < 300)
-              throw new AssertionError("nontrading stats include wrong villagers");
+            if (service.stats().get("nontrading") != 0)
+              throw new AssertionError("ineligible villagers entered stats");
             if (service.markers.size() < 301 || !service.markers.containsKey(id))
-              throw new AssertionError("all in-range villagers should be marked");
+              throw new AssertionError("all in-range workers should be marked");
             System.out.println(
                 "VV_PERFORMANCE loaded="
                     + service.records().size()
@@ -239,6 +246,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         for (double x : new double[] {47.5, 49.5}) {
           var v = new Villager(EntityTypes.VILLAGER, s.overworld());
           v.setNoAi(true);
+          setProfession(v, VillagerProfession.LIBRARIAN);
           v.setPos(x, -60, -9.5);
           s.overworld().addFreshEntity(v);
           ids.add(v.getUUID());
@@ -250,7 +258,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         var service = VerdictService.INSTANCE;
         var s = service.settings;
         service.settings(new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(),
-            s.outlines(), s.throughWalls(), s.green(), s.yellow(), s.red(), 48, s.scanTicks(), false,
+            s.green(), s.yellow(), s.red(), 48, s.scanTicks(), false,
             1, 1, s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(), s.backups(),
             s.notifications(), s.autoServers(), s.acknowledged(), s.dataset()));
         service.scan();
@@ -258,7 +266,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         service.tick();
         if (service.markers.size() != 302 || !service.markers.containsKey(distanceIds.getFirst())
             || service.markers.containsKey(distanceIds.getLast())
-            || !service.markers.get(distanceIds.getFirst()).summary())
+            || service.markers.get(distanceIds.getFirst()).lines().isEmpty())
           throw new AssertionError("scan boundary/fallback: markers=" + service.markers.size()
               + " nearby=" + service.nearby.size() + " player=" + mc.player.position()
               + " near=" + service.markers.get(distanceIds.getFirst())
@@ -314,6 +322,32 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       c.waitFor(mc -> VerdictService.INSTANCE.ready());
       assertActiveConfiguration(c, disconnected);
     }
+    c.runOnClient(mc -> {
+      if (mc.level != null) throw new AssertionError("fallback test requires no loaded world");
+      var parent = mc.gui.screen();
+      var vanilla = new net.minecraft.client.gui.screens.ConfirmScreen(yes -> {},
+          net.minecraft.network.chat.Component.literal("Test"), net.minecraft.network.chat.Component.literal("Message"));
+      mc.gui.setScreen(vanilla);
+      var baseline = new net.minecraft.client.renderer.state.gui.GuiRenderState();
+      vanilla.extractBackground(new net.minecraft.client.gui.GuiGraphicsExtractor(mc, baseline, -1, -1), -1, -1, 0);
+      int[] vanillaElements = {0};
+      baseline.forEachElement(element -> vanillaElements[0]++,
+          net.minecraft.client.renderer.state.gui.GuiRenderState.TraverseRange.ALL);
+      for (var screen : List.of(new VerdictScreen(), new WorldConfirmScreen(yes -> {},
+          net.minecraft.network.chat.Component.literal("Test"), net.minecraft.network.chat.Component.literal("Message")))) {
+        mc.gui.setScreen(screen);
+        var state = new net.minecraft.client.renderer.state.gui.GuiRenderState();
+        screen.extractBackground(new net.minecraft.client.gui.GuiGraphicsExtractor(mc, state, -1, -1), -1, -1, 0);
+        int[] elements = {0};
+        state.forEachElement(element -> elements[0]++,
+            net.minecraft.client.renderer.state.gui.GuiRenderState.TraverseRange.ALL);
+        if (elements[0] == 0 || elements[0] != vanillaElements[0]
+            || !privateField(state, "firstStratumAfterBlur").equals(privateField(baseline, "firstStratumAfterBlur")))
+          throw new AssertionError("no-world background differs from the native menu");
+      }
+      mc.gui.setScreen(parent);
+    });
+    System.out.println("VV_MENU_BACKGROUND_PASS no-world native background retained");
     System.out.println("VV_CLEAR_TRANSITIONS_PASS dataset, dimension, disconnect, reload, configuration, empty records");
   }
 
@@ -544,6 +578,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     waitDataScreen(c);
     c.takeScreenshot("world-data");
     c.clickScreenButton("vv.clearWorld");
+    c.runOnClient(this::assertTransparent);
     c.takeScreenshot("clear-world-confirm");
     c.clickScreenButton("gui.no");
     c.runOnClient(mc -> {
@@ -625,6 +660,15 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       service.manual(villagers.get(0));
       if (service.probe.context() == null) throw new AssertionError("test request not established");
       var future = service.clearWorldVillagers(service.identity());
+      // Queue the bound scan key while the completion callback cannot yet run on this thread.
+      var scanKey = InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_F9);
+      VillagerverdictClient.shortcutManager().bind(VillagerverdictClient.shortcuts().get(1), scanKey);
+      net.minecraft.client.KeyMapping.click(scanKey);
+      net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.invoker().onEndTick(mc);
+      var overlay = (net.minecraft.network.chat.Component) privateField(mc.gui.hud, "overlayMessageString");
+      if (!overlay.getString().equals(net.minecraft.network.chat.Component.translatable("vv.feedback.scanUnavailable").getString()))
+        throw new AssertionError("blocked scan claimed success");
+      VillagerverdictClient.resetShortcuts();
       service.manual(villagers.get(1));
       if (service.probe.context() != null) throw new AssertionError("interaction entered pending clear");
       return future;
@@ -713,9 +757,648 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     });
   }
 
+  private static Object privateField(Object instance, String name) {
+    try {
+      var field = instance.getClass().getDeclaredField(name);
+      field.setAccessible(true);
+      return field.get(instance);
+    } catch (ReflectiveOperationException e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  private void assertOverlay(ClientGameTestContext c, String key, Object... args) {
+    c.runOnClient(mc -> {
+      var actual = (net.minecraft.network.chat.Component) privateField(mc.gui.hud, "overlayMessageString");
+      var expected = net.minecraft.network.chat.Component.translatable(key, args).getString();
+      if (actual == null || !actual.getString().equals(expected)
+          || (int) privateField(mc.gui.hud, "overlayMessageTime") <= 0)
+        throw new AssertionError("action bar mismatch: expected " + expected + ", got " + actual);
+    });
+  }
+
+  private void testShortcutFeedback(ClientGameTestContext c, TestServerContext server) {
+    var original = c.computeOnClient(mc -> VerdictService.INSTANCE.settings);
+    c.runOnClient(mc -> {
+      int[] keys = {InputConstants.KEY_F8, InputConstants.KEY_F9, InputConstants.KEY_F10,
+          InputConstants.KEY_F6, InputConstants.KEY_F7};
+      for (int i = 0; i < keys.length; i++)
+        VillagerverdictClient.shortcutManager().bind(VillagerverdictClient.shortcuts().get(i),
+            InputConstants.Type.KEYBOARD.getOrCreate(keys[i]));
+    });
+    c.getInput().pressKey(InputConstants.KEY_F10);
+    assertOverlay(c, "vv.feedback.markersOff");
+    c.takeScreenshot("feedback-markers-en");
+    c.getInput().pressKey(InputConstants.KEY_F10);
+    assertOverlay(c, "vv.feedback.markersOn");
+    c.getInput().pressKey(InputConstants.KEY_F9);
+    assertOverlay(c, "vv.feedback.scan", 0);
+    c.getInput().pressKey(InputConstants.KEY_F6);
+    assertOverlay(c, "vv.feedback.noTarget");
+    c.getInput().pressKey(InputConstants.KEY_F7);
+    c.waitForScreen(WorldConfirmScreen.class);
+    c.runOnClient(mc -> {
+      if (VerdictService.INSTANCE.probe.running()) throw new AssertionError("probe enabled before consent");
+      assertTransparent(mc);
+    });
+    c.takeScreenshot("transparent-probe-confirm-en");
+    c.clickScreenButton("gui.no");
+    assertOverlay(c, "vv.feedback.probeCancelled");
+    c.getInput().pressKey(InputConstants.KEY_F7);
+    c.waitForScreen(WorldConfirmScreen.class);
+    c.clickScreenButton("gui.yes");
+    assertOverlay(c, "vv.feedback.probeOn");
+    c.runOnClient(mc -> {
+      if (!VerdictService.INSTANCE.probe.running()) throw new AssertionError("probe did not start");
+    });
+    c.getInput().pressKey(InputConstants.KEY_F7);
+    assertOverlay(c, "vv.feedback.probePaused");
+    c.runOnClient(mc -> {
+      if (VerdictService.INSTANCE.probe.running()) throw new AssertionError("probe did not pause");
+      mc.gui.hud.setOverlayMessage(net.minecraft.network.chat.Component.literal("quiet background"), false);
+    });
+    c.waitTicks(25);
+    c.runOnClient(mc -> {
+      VerdictService.INSTANCE.navigateNext();
+      if (!((net.minecraft.network.chat.Component) privateField(mc.gui.hud, "overlayMessageString"))
+          .getString().equals("quiet background")) throw new AssertionError("background action emitted feedback");
+    });
+    UUID worker = server.computeOnServer(s -> {
+      var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+      v.setNoAi(true);
+      setProfession(v, VillagerProfession.LIBRARIAN);
+      v.setPos(2, -60, 0);
+      s.overworld().addFreshEntity(v);
+      return v.getUUID();
+    });
+    c.waitFor(mc -> mc.level.getEntity(worker) != null);
+    c.getInput().pressKey(InputConstants.KEY_F9);
+    assertOverlay(c, "vv.feedback.scan", 1);
+    c.getInput().pressKey(InputConstants.KEY_F6);
+    int distance = c.computeOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (!worker.equals(service.selected)) throw new AssertionError("shortcut selected wrong villager");
+      return (int) Math.sqrt(service.distanceSquared(service.record(worker)));
+    });
+    assertOverlay(c, "vv.feedback.located", 2, -60, 0, distance);
+    c.takeScreenshot("feedback-located-en");
+    c.setScreen(() -> new ShortcutScreen(new VerdictScreen()));
+    c.clickScreenButton("key.villagerverdict.mark");
+    c.getInput().pressKey(InputConstants.KEY_F10);
+    c.runOnClient(mc -> {
+      if (!VerdictService.INSTANCE.settings.markers()) throw new AssertionError("capture triggered gameplay action");
+      var message = (net.minecraft.network.chat.Component) privateField(mc.gui.hud, "overlayMessageString");
+      if (!message.getString().equals(net.minecraft.network.chat.Component.translatable(
+          "vv.feedback.located", 2, -60, 0, distance).getString()))
+        throw new AssertionError("capture emitted gameplay feedback");
+    });
+    c.clickScreenButton("gui.done");
+    c.runOnClient(mc -> mc.gui.setScreen(null));
+    server.runOnServer(s -> setProfession((Villager) s.overworld().getEntity(worker), VillagerProfession.NONE));
+    c.waitFor(mc -> VerdictService.INSTANCE.record(worker) == null);
+    server.runOnServer(s -> s.overworld().getEntity(worker).discard());
+    c.waitFor(mc -> mc.level.getEntity(worker) == null);
+    c.runOnClient(mc -> {
+      VerdictService.INSTANCE.probe.reset();
+      VerdictService.INSTANCE.settings(original);
+      VillagerverdictClient.resetShortcuts();
+    });
+    System.out.println("VV_SHORTCUT_FEEDBACK_PASS real keys, action bar, scan, target, consent, pause, capture, quiet background");
+  }
+
+  private void assertTransparent(net.minecraft.client.Minecraft mc) {
+    var screen = mc.gui.screen();
+    var state = new net.minecraft.client.renderer.state.gui.GuiRenderState();
+    var graphics = new net.minecraft.client.gui.GuiGraphicsExtractor(mc, state, -1, -1);
+    Object noBlur = privateField(state, "firstStratumAfterBlur");
+    screen.extractBackground(graphics, -1, -1, 0);
+    state.forEachElement(element -> { throw new AssertionError("world background contains a draw operation"); },
+        net.minecraft.client.renderer.state.gui.GuiRenderState.TraverseRange.ALL);
+    screen.extractRenderState(graphics, -1, -1, 0);
+    if (!noBlur.equals(privateField(state, "firstStratumAfterBlur")) || screen.isPauseScreen())
+      throw new AssertionError("mod screen blurred or paused the world");
+    state.forEachElement(element -> {
+      var bounds = element.bounds();
+      if (bounds != null && bounds.width() >= screen.width && bounds.height() >= screen.height)
+        throw new AssertionError("mod screen paints a full-screen element");
+    }, net.minecraft.client.renderer.state.gui.GuiRenderState.TraverseRange.ALL);
+  }
+
+  private void testTransparentScreens(ClientGameTestContext c, TestServerContext server, String locale) {
+    int originalScale = c.computeOnClient(mc -> mc.options.guiScale().get());
+    for (String lighting : List.of("day", "night")) {
+      server.runCommand("time set " + lighting);
+      c.waitTicks(3);
+      for (int scale : new int[] {1, 2}) {
+        c.runOnClient(mc -> {
+          mc.options.guiScale().set(scale);
+          mc.resizeGui();
+          mc.gui.setScreen(new VerdictScreen());
+          assertTransparent(mc);
+        });
+        c.takeScreenshot("transparent-management-" + locale + "-" + lighting + "-" + scale);
+      }
+    }
+    for (String page : List.of("vv.details", "vv.targets", "vv.regions", "vv.settings", "vv.shortcuts", "vv.data")) {
+      c.setScreen(VerdictScreen::new);
+      c.clickScreenButton(page);
+      c.runOnClient(this::assertTransparent);
+      c.takeScreenshot("transparent-" + page.substring(3) + "-" + locale);
+    }
+    c.runOnClient(mc -> {
+      mc.options.guiScale().set(originalScale);
+      mc.resizeGui();
+      mc.gui.setScreen(new VerdictScreen());
+    });
+    server.runCommand("time set day");
+    if (locale.equals("zh")) {
+      c.runOnClient(mc -> {
+        mc.gui.setScreen(null);
+        VillagerverdictClient.shortcutManager().bind(VillagerverdictClient.shortcuts().get(2),
+            InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_F10));
+      });
+      c.getInput().pressKey(InputConstants.KEY_F10);
+      assertOverlay(c, "vv.feedback.markersOff");
+      c.takeScreenshot("feedback-markers-zh");
+      c.getInput().pressKey(InputConstants.KEY_F10);
+      assertOverlay(c, "vv.feedback.markersOn");
+      c.runOnClient(mc -> {
+        VillagerverdictClient.resetShortcuts();
+        mc.gui.setScreen(new VerdictScreen());
+      });
+    }
+    System.out.println("VV_TRANSPARENT_PASS " + locale + " day/night, wide/narrow, all management pages, no blur/pause/full-screen fill");
+  }
+
+  private void testManualCaptureAfterProfessionChange(ClientGameTestContext c,
+      TestServerContext server, TestServerConnection connection, UUID source) {
+    var originalSettings = c.computeOnClient(mc -> VerdictService.INSTANCE.settings);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      var s = service.settings;
+      service.settings(new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(),
+          s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), false,
+          s.markerLimit(), s.textRange(), s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(),
+          s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), s.dataset()));
+    });
+    UUID worker = server.computeOnServer(s -> {
+      var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+      v.setNoAi(true);
+      v.setPos(2, -60, 0);
+      setProfession(v, VillagerProfession.LIBRARIAN);
+      v.setVillagerData(v.getVillagerData().withLevel(5));
+      s.overworld().addFreshEntity(v);
+      return v.getUUID();
+    });
+    c.waitFor(mc -> mc.level.getEntity(worker) != null);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.scan();
+      service.edit(service.record(worker).withSnapshot(service.record(source).snapshot())
+          .withManual(VillagerRecord.Manual.PROTECT, "retain note", Set.of("retain-tag")));
+    });
+    server.runOnServer(s -> {
+      var v = (Villager) s.overworld().getEntity(worker);
+      setProfession(v, VillagerProfession.FARMER);
+      var offers = new MerchantOffers();
+      offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 3),
+          new ItemStack(Items.WHEAT), 12, 1, 0));
+      v.setOffers(offers);
+    });
+    c.waitFor(mc -> ((Villager) mc.level.getEntity(worker)).getVillagerData()
+        .profession().is(VillagerProfession.FARMER));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (!service.record(worker).profession().equals("minecraft:librarian")
+          || service.record(worker).snapshot() == null)
+        throw new AssertionError("regression setup must retain the unscanned old profession");
+      var v = mc.level.getEntity(worker);
+      net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker().interact(
+          mc.player, mc.level, InteractionHand.MAIN_HAND, v, new EntityHitResult(v, v.position()));
+      if (!service.record(worker).profession().equals("minecraft:farmer")
+          || service.record(worker).snapshot() != null)
+        throw new AssertionError("manual probe did not refresh profession and clear old snapshot");
+      mc.gameMode.interact(mc.player, v, new EntityHitResult(v, v.position()), InteractionHand.MAIN_HAND);
+    });
+    c.waitForScreen(MerchantScreen.class);
+    c.waitFor(mc -> VerdictService.INSTANCE.record(worker).snapshot() != null);
+    c.runOnClient(mc -> {
+      var r = VerdictService.INSTANCE.record(worker);
+      if (!r.snapshot().trades().getFirst().output().item().equals("minecraft:wheat")
+          || r.manual() != VillagerRecord.Manual.PROTECT || !r.note().equals("retain note")
+          || !r.tags().equals(Set.of("retain-tag")))
+        throw new AssertionError("manual capture lost new offers or existing annotations");
+      mc.player.closeContainer();
+    });
+    connection.waitForServerboundPackets();
+    server.runOnServer(s -> setProfession((Villager) s.overworld().getEntity(worker), VillagerProfession.NONE));
+    c.waitFor(mc -> VerdictService.INSTANCE.record(worker) == null);
+    c.runOnClient(mc -> VerdictService.INSTANCE.settings(originalSettings));
+    server.runOnServer(s -> s.overworld().getEntity(worker).discard());
+    c.waitFor(mc -> mc.level.getEntity(worker) == null);
+    System.out.println("VV_MANUAL_PROFESSION_PASS unscanned profession, old snapshot invalidation, real offers, annotations");
+  }
+
+  private static void setProfession(Villager v,
+      net.minecraft.resources.ResourceKey<VillagerProfession> profession) {
+    v.setVillagerData(v.getVillagerData().withProfession(v.level().registryAccess()
+        .lookupOrThrow(net.minecraft.core.registries.Registries.VILLAGER_PROFESSION)
+        .getOrThrow(profession)));
+  }
+
+  private void captureTrades(ClientGameTestContext c, UUID id) {
+    c.runOnClient(mc -> {
+      var v = mc.level.getEntity(id);
+      net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker().interact(
+          mc.player, mc.level, InteractionHand.MAIN_HAND, v, new EntityHitResult(v, v.position()));
+      mc.gameMode.interact(mc.player, v, new EntityHitResult(v, v.position()), InteractionHand.MAIN_HAND);
+    });
+    c.waitForScreen(MerchantScreen.class);
+    c.waitFor(mc -> VerdictService.INSTANCE.record(id) != null && VerdictService.INSTANCE.record(id).snapshot() != null);
+    c.runOnClient(mc -> mc.player.closeContainer());
+  }
+
+  private static List<String> labelText(net.minecraft.client.renderer.entity.state.EntityRenderState state) {
+    var lines = state.getData(MarkerRenderer.LINES);
+    return lines == null ? List.of() : lines.stream().map(net.minecraft.network.chat.Component::getString).toList();
+  }
+
+  private Settings markerSettings(Settings s, boolean markers, boolean status, boolean summary) {
+    return new Settings(s.version(), markers, status, summary, s.green(), s.yellow(), s.red(),
+        s.radius(), s.scanTicks(), s.autoScan(), s.markerLimit(), s.textRange(), s.cacheMillis(),
+        s.intervalMillis(), s.timeoutMillis(), s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), s.dataset());
+  }
+
+  private void testMultilineMarkers(ClientGameTestContext c, TestServerContext server, TestServerConnection connection) {
+    var original = c.computeOnClient(mc -> VerdictService.INSTANCE.settings);
+    var ids = server.computeOnServer(s -> {
+      var result = new ArrayList<UUID>();
+      var registry = s.overworld().registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+      for (int i = 0; i < 3; i++) {
+        var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+        v.setNoAi(true);
+        v.setPos(i == 0 ? -1 : i, -60, i == 0 ? 1 : 2);
+        setProfession(v, i == 1 ? VillagerProfession.ARMORER : VillagerProfession.LIBRARIAN);
+        var offers = new MerchantOffers();
+        if (i == 0) {
+          v.setCustomName(net.minecraft.network.chat.Component.literal("Alice").withColor(0x55AAFF));
+          v.setCustomNameVisible(true);
+          for (int book = 0; book < 3; book++) {
+            var stack = new ItemStack(Items.ENCHANTED_BOOK);
+            var ench = new net.minecraft.world.item.enchantment.ItemEnchantments.Mutable(
+                net.minecraft.world.item.enchantment.ItemEnchantments.EMPTY);
+            if (book == 0) {
+              ench.set(registry.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.MENDING), 1);
+              ench.set(registry.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.PROTECTION), 3);
+            } else if (book == 1) ench.set(registry.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.UNBREAKING), 3);
+            else ench.set(registry.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.PROTECTION), 4);
+            stack.set(net.minecraft.core.component.DataComponents.STORED_ENCHANTMENTS, ench.toImmutable());
+            offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 5), stack, 12, 1, 0));
+          }
+        } else if (i == 1) {
+          for (var item : List.of(Items.IRON_LEGGINGS, Items.DIAMOND_LEGGINGS, Items.DIAMOND_BOOTS, Items.DIAMOND_LEGGINGS))
+            offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 5), new ItemStack(item), 12, 1, 0));
+        }
+        v.setOffers(offers);
+        s.overworld().addFreshEntity(v);
+        result.add(v.getUUID());
+      }
+      return result;
+    });
+    UUID librarian = ids.get(0), armorer = ids.get(1), uninspected = ids.get(2);
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) != null));
+    c.runOnClient(mc -> VerdictService.INSTANCE.scan());
+    captureTrades(c, librarian);
+    captureTrades(c, armorer);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.edit(service.record(librarian).withManual(VillagerRecord.Manual.PROTECT, "", Set.of()));
+      service.edit(service.record(armorer).withManual(VillagerRecord.Manual.PROTECT, "", Set.of()));
+    });
+    c.waitFor(mc -> VerdictService.INSTANCE.markers.containsKey(librarian)
+        && VerdictService.INSTANCE.markers.get(librarian).lines().getFirst().getString().equals("保留")
+        && VerdictService.INSTANCE.markers.containsKey(armorer)
+        && VerdictService.INSTANCE.markers.get(armorer).lines().getFirst().getString().equals("保留"));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      var v = (Villager) mc.level.getEntity(librarian);
+      var renderer = mc.getEntityRenderDispatcher().getRenderer(v);
+      var state = renderer.createRenderState(v, 0);
+      var expected = List.of("保留", "等级：1", "经验修补", "保护4", "耐久3");
+      if (!labelText(state).equals(expected)) throw new AssertionError("Chinese marker lines: " + labelText(state));
+      if (!state.nameTag.getString().equals("Alice") || state.nameTag.getStyle().getColor().getValue() != 0x55AAFF)
+        throw new AssertionError("custom name lost text or color");
+      if (state.nameTagAttachment.y <= state.boundingBoxHeight + .35 + 4 * MarkerRenderer.LINE_HEIGHT)
+        throw new AssertionError("custom name overlaps marker block");
+      if (!labelText(mc.getEntityRenderDispatcher().getRenderer(mc.level.getEntity(armorer))
+          .createRenderState(mc.level.getEntity(armorer), 0)).equals(List.of("保留", "等级：1", "钻石护腿", "钻石靴子")))
+        throw new AssertionError("armorer signature goods wrong");
+      if (labelText(mc.getEntityRenderDispatcher().getRenderer(mc.level.getEntity(uninspected))
+          .createRenderState(mc.level.getEntity(uninspected), 0)).size() != 2)
+        throw new AssertionError("uninspected trades were invented");
+      var noGoods = service.record(armorer).withSnapshot(new TradeSnapshot(List.of(), 1,
+          System.currentTimeMillis(), TradeSnapshot.Completeness.CURRENT));
+      if (MarkerText.lines(noGoods, AnalysisResult.Status.REVIEW, true, true).size() != 2)
+        throw new AssertionError("empty signature goods invented lines");
+      for (boolean markers : new boolean[] {false, true})
+        for (boolean status : new boolean[] {false, true})
+          for (boolean summary : new boolean[] {false, true}) {
+            service.settings(markerSettings(original, markers, status, summary));
+            service.tick();
+            reuseRenderState(mc, v, state);
+            var wanted = !markers || !status && !summary ? List.<String>of()
+                : !summary ? List.of("+") : status ? expected : expected.subList(1, expected.size());
+            if (!labelText(state).equals(wanted)) throw new AssertionError("marker switches/reused state: " + labelText(state));
+          }
+      service.settings(original);
+      service.tick();
+      var playerState = mc.getEntityRenderDispatcher().getRenderer(mc.player).createRenderState(mc.player, 0);
+      playerState.setData(MarkerRenderer.LINES, state.getData(MarkerRenderer.LINES));
+      reuseRenderState(mc, mc.player, playerState);
+      if (playerState.getData(MarkerRenderer.LINES) != null) throw new AssertionError("non-villager inherited marker lines");
+      assertSubmittedMarkerRows(mc, v, expected);
+    });
+    server.runCommand("tp @p -1 -60 -4");
+    connection.waitForClientboundPackets();
+    c.getInput().lookAt(new net.minecraft.core.BlockPos(-1, -58, 1));
+    c.takeScreenshot("multiline-marker-near-zh");
+    server.runCommand("fill -2 -60 -1 0 -55 -1 minecraft:stone");
+    connection.waitForClientboundPackets();
+    c.waitTicks(3);
+    c.runOnClient(mc -> {
+      var v = (Villager) mc.level.getEntity(librarian);
+      var state = mc.getEntityRenderDispatcher().getRenderer(v).createRenderState(v, 0);
+      if (mc.player.hasLineOfSight(v) || labelText(state).size() != 5 || !state.appearsGlowing())
+        throw new AssertionError("wall marker missing");
+    });
+    c.takeScreenshot("multiline-marker-wall-zh");
+    server.runCommand("fill -2 -60 -1 0 -55 -1 minecraft:air");
+    server.runCommand("tp @p -1 -60 -18");
+    connection.waitForClientboundPackets();
+    c.getInput().lookAt(new net.minecraft.core.BlockPos(-1, -58, 1));
+    c.takeScreenshot("multiline-marker-far-zh");
+    server.runCommand("tp @p -1 -60 -6");
+    var crowd = server.computeOnServer(s -> {
+      var result = new ArrayList<UUID>();
+      for (int i = 0; i < 8; i++) {
+        var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+        v.setNoAi(true);
+        setProfession(v, VillagerProfession.LIBRARIAN);
+        v.setPos(-4 + i, -60, 4 + i % 2);
+        s.overworld().addFreshEntity(v);
+        result.add(v.getUUID());
+      }
+      return result;
+    });
+    c.waitFor(mc -> crowd.stream().allMatch(id -> mc.level.getEntity(id) != null));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.scan();
+      for (var id : crowd)
+        service.edit(service.record(id).withSnapshot(service.record(librarian).snapshot())
+            .withManual(VillagerRecord.Manual.PROTECT, "layout fixture", Set.of()));
+    });
+    c.waitFor(mc -> crowd.stream().allMatch(id -> VerdictService.INSTANCE.markers.get(id) != null
+        && VerdictService.INSTANCE.markers.get(id).lines().size() == 5
+        && VerdictService.INSTANCE.markers.get(id).lines().getFirst().getString().equals("保留")));
+    c.getInput().lookAt(new net.minecraft.core.BlockPos(0, -58, 4));
+    c.takeScreenshot("multiline-marker-crowded-zh");
+    server.runOnServer(s -> crowd.forEach(id -> setProfession((Villager) s.overworld().getEntity(id), VillagerProfession.NONE)));
+    c.waitFor(mc -> crowd.stream().allMatch(id -> VerdictService.INSTANCE.record(id) == null));
+    server.runOnServer(s -> crowd.forEach(id -> s.overworld().getEntity(id).discard()));
+    c.waitFor(mc -> crowd.stream().allMatch(id -> mc.level.getEntity(id) == null));
+    server.runCommand("tp @p -1 -60 -18");
+    connection.waitForClientboundPackets();
+    c.getInput().lookAt(new net.minecraft.core.BlockPos(-1, -58, 1));
+    var reload = c.computeOnClient(mc -> {
+      mc.getLanguageManager().setSelected("en_us");
+      mc.options.languageCode = "en_us";
+      return mc.reloadResourcePacks();
+    });
+    c.waitFor(mc -> reload.isDone() && mc.gui.overlay() == null, 600);
+    c.waitFor(mc -> VerdictService.INSTANCE.markers.get(librarian).lines().getFirst().getString().equals("Keep"));
+    c.runOnClient(mc -> {
+      var lines = VerdictService.INSTANCE.markers.get(librarian).lines().stream().map(net.minecraft.network.chat.Component::getString).toList();
+      if (!lines.equals(List.of("Keep", "Level: 1", "Mending", "Protection 4", "Unbreaking 3")))
+        throw new AssertionError("English marker lines: " + lines);
+    });
+    c.takeScreenshot("multiline-marker-far-en");
+    var back = c.computeOnClient(mc -> {
+      mc.getLanguageManager().setSelected("zh_cn");
+      mc.options.languageCode = "zh_cn";
+      return mc.reloadResourcePacks();
+    });
+    c.waitFor(mc -> back.isDone() && mc.gui.overlay() == null, 600);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      var s = service.settings;
+      service.settings(new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(),
+          s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), false, s.markerLimit(),
+          s.textRange(), s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(), s.backups(),
+          s.notifications(), s.autoServers(), s.acknowledged(), s.dataset()));
+    });
+    server.runOnServer(s -> setProfession((Villager) s.overworld().getEntity(librarian), VillagerProfession.FARMER));
+    c.waitFor(mc -> ((Villager) mc.level.getEntity(librarian)).getVillagerData().profession().is(VillagerProfession.FARMER));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      var v = (Villager) mc.level.getEntity(librarian);
+      var renderer = mc.getEntityRenderDispatcher().getRenderer(v);
+      if (!labelText(renderer.createRenderState(v, 0)).isEmpty())
+        throw new AssertionError("unscanned profession change kept previous highlights");
+      service.scan();
+      service.tick();
+      if (service.record(librarian).snapshot() != null || labelText(renderer.createRenderState(v, 0)).size() != 2)
+        throw new AssertionError("profession change did not clear old highlights");
+      service.settings(original);
+    });
+    server.runOnServer(s -> ids.forEach(id -> setProfession((Villager) s.overworld().getEntity(id), VillagerProfession.NONE)));
+    c.waitFor(mc -> ids.stream().noneMatch(id -> VerdictService.INSTANCE.record(id) != null));
+    server.runOnServer(s -> ids.forEach(id -> s.overworld().getEntity(id).discard()));
+    c.waitFor(mc -> ids.stream().noneMatch(id -> mc.level.getEntity(id) != null));
+    server.runCommand("tp @p 0 -60 0");
+    connection.waitForClientboundPackets();
+    System.out.println("VV_MULTILINE_PASS real offers, languages, highest enchantment, armor, custom name, switches, reused state, submission, wall, far");
+  }
+
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  private void reuseRenderState(net.minecraft.client.Minecraft mc, net.minecraft.world.entity.Entity entity,
+      net.minecraft.client.renderer.entity.state.EntityRenderState state) {
+    // Each state was created by this entity's renderer; the helper only erases the wildcard.
+    ((net.minecraft.client.renderer.entity.EntityRenderer) mc.getEntityRenderDispatcher().getRenderer(entity))
+        .extractRenderState(entity, state, 0);
+  }
+
+  private void assertSubmittedMarkerRows(net.minecraft.client.Minecraft mc, Villager v, List<String> expected) {
+    try {
+      var renderer = mc.getEntityRenderDispatcher().getRenderer(v);
+      var state = renderer.createRenderState(v, 0);
+      var submitted = new ArrayList<String>();
+      var anchors = new ArrayList<Double>();
+      var collector = (net.minecraft.client.renderer.SubmitNodeCollector) java.lang.reflect.Proxy.newProxyInstance(
+          getClass().getClassLoader(), new Class<?>[] {net.minecraft.client.renderer.SubmitNodeCollector.class},
+          (proxy, method, args) -> {
+            if (method.getName().equals("submitNameTag")) {
+              submitted.add(((net.minecraft.network.chat.Component) args[3]).getString());
+              anchors.add(((net.minecraft.world.phys.Vec3) args[1]).y);
+              if (!(boolean) args[4]) throw new AssertionError("marker not submitted through walls");
+            }
+            return null;
+          });
+      var submit = net.minecraft.client.renderer.entity.EntityRenderer.class.getDeclaredMethod("submitNameDisplay",
+          net.minecraft.client.renderer.entity.state.EntityRenderState.class,
+          com.mojang.blaze3d.vertex.PoseStack.class, net.minecraft.client.renderer.SubmitNodeCollector.class,
+          net.minecraft.client.renderer.state.level.CameraRenderState.class);
+      submit.setAccessible(true);
+      submit.invoke(renderer, state, new com.mojang.blaze3d.vertex.PoseStack(), collector,
+          new net.minecraft.client.renderer.state.level.CameraRenderState());
+      var wanted = new ArrayList<String>();
+      wanted.add("Alice");
+      wanted.addAll(expected);
+      if (!submitted.equals(wanted)) throw new AssertionError("submitted rows: " + submitted);
+      for (int i = 1; i < anchors.size(); i++)
+        if (Math.abs(anchors.get(i - 1) - anchors.get(i) - MarkerRenderer.LINE_HEIGHT) > 0.00001)
+          throw new AssertionError("marker rows overlap or have wrong spacing");
+    } catch (ReflectiveOperationException e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  private void testEligibilityAndOutlines(ClientGameTestContext c, TestServerContext server,
+      TestServerConnection connection, UUID source) {
+    var ids = server.computeOnServer(s -> {
+      var result = new ArrayList<UUID>();
+      for (int i = 0; i < 3; i++) {
+        var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+        v.setNoAi(true);
+        v.setPos(i * 2, -60, 6);
+        if (i == 1) setProfession(v, VillagerProfession.NITWIT);
+        if (i == 2) {
+          setProfession(v, VillagerProfession.LIBRARIAN);
+          v.setAge(-24000);
+        }
+        s.overworld().addFreshEntity(v);
+        result.add(v.getUUID());
+      }
+      return result;
+    });
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) != null));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.scan();
+      service.tick();
+      for (var id : ids) {
+        service.manual(mc.level.getEntity(id));
+        if (service.record(id) != null || service.markers.containsKey(id)
+            || service.nearby.contains(id) || service.probe.context() != null)
+          throw new AssertionError("ineligible villager entered records/markers/probe");
+      }
+    });
+    UUID worker = ids.getFirst();
+    server.runOnServer(s -> {
+      var v = (Villager) s.overworld().getEntity(worker);
+      setProfession(v, VillagerProfession.LIBRARIAN);
+      v.setVillagerData(v.getVillagerData().withLevel(5));
+    });
+    c.waitFor(mc -> VerdictService.eligible((Villager) mc.level.getEntity(worker)));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.scan();
+      service.tick();
+      var v = (Villager) mc.level.getEntity(worker);
+      if (service.record(worker) == null || !service.markers.containsKey(worker))
+        throw new AssertionError("new worker not scanned");
+      var state = mc.getEntityRenderDispatcher().getRenderer(v).createRenderState(v, 0);
+      if (!state.appearsGlowing() || state.outlineColor != service.markers.get(worker).color()
+          || v.isCurrentlyGlowing()) throw new AssertionError("client outline missing or entity mutated");
+      SettingsScreen.toggleMarkers();
+      if (mc.getEntityRenderDispatcher().getRenderer(v).createRenderState(v, 0).appearsGlowing())
+        throw new AssertionError("master switch did not disable outline");
+      SettingsScreen.toggleMarkers();
+      service.tick();
+      service.edit(service.record(worker).withSnapshot(service.record(source).snapshot()));
+    });
+    server.runOnServer(s -> s.overworld().getEntity(worker).setGlowingTag(true));
+    c.waitFor(mc -> mc.level.getEntity(worker).isCurrentlyGlowing());
+    c.runOnClient(mc -> {
+      var v = (Villager) mc.level.getEntity(worker);
+      if (mc.getEntityRenderDispatcher().getRenderer(v).createRenderState(v, 0).outlineColor
+          == VerdictService.INSTANCE.markers.get(worker).color())
+        throw new AssertionError("vanilla outline overwritten");
+    });
+    server.runOnServer(s -> s.overworld().getEntity(worker).setGlowingTag(false));
+    c.waitFor(mc -> !mc.level.getEntity(worker).isCurrentlyGlowing());
+    c.getInput().lookAt(new net.minecraft.core.BlockPos(0, -59, 6));
+    c.takeScreenshot("worker-outline-visible");
+    server.runCommand("fill -1 -60 3 1 -57 3 minecraft:stone");
+    connection.waitForClientboundPackets();
+    c.waitTicks(3);
+    c.runOnClient(mc -> {
+      var v = (Villager) mc.level.getEntity(worker);
+      var state = mc.getEntityRenderDispatcher().getRenderer(v).createRenderState(v, 0);
+      if (mc.player.hasLineOfSight(v) || !state.appearsGlowing() || state.getData(MarkerRenderer.LINES) == null)
+        throw new AssertionError("wall outline/name missing or wall did not occlude worker");
+    });
+    c.takeScreenshot("worker-outline-through-wall");
+    server.runCommand("fill -1 -60 3 1 -57 3 minecraft:air");
+    server.runOnServer(s -> setProfession((Villager) s.overworld().getEntity(worker), VillagerProfession.FARMER));
+    c.waitFor(mc -> ((Villager) mc.level.getEntity(worker)).getVillagerData().profession().is(VillagerProfession.FARMER));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.scan();
+      if (service.record(worker).snapshot() != null)
+        throw new AssertionError("previous profession snapshot survived");
+      service.selected = worker;
+      service.manual(mc.level.getEntity(worker));
+      if (service.probe.context() == null) throw new AssertionError("worker manual probe missing");
+    });
+    server.runOnServer(s -> setProfession((Villager) s.overworld().getEntity(worker), VillagerProfession.NONE));
+    c.waitFor(mc -> !VerdictService.eligible((Villager) mc.level.getEntity(worker)));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      var v = (Villager) mc.level.getEntity(worker);
+      if (mc.getEntityRenderDispatcher().getRenderer(v).createRenderState(v, 0).appearsGlowing())
+        throw new AssertionError("unemployed worker retains stale outline");
+      service.tick();
+      if (service.record(worker) != null || service.markers.containsKey(worker)
+          || service.nearby.contains(worker) || service.selected != null || service.probe.context() != null
+          || service.analysis.verdicts().containsKey(worker))
+        throw new AssertionError("worker loss did not clear state");
+      service.save();
+    });
+    var catalog = c.computeOnClient(mc -> VerdictService.INSTANCE.storedWorlds());
+    c.waitFor(mc -> catalog.isDone());
+    catalog.join();
+    var directory = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir()
+        .resolve("villagerverdict/worlds");
+    try (var store = new JsonStore(e -> { throw new AssertionError(e); })) {
+      if (store.worlds(directory).join().stream().flatMap(w -> w.villagers().stream())
+          .anyMatch(v -> ids.contains(v.uuid())))
+        throw new AssertionError("ineligible villagers persisted to disk");
+    }
+    server.runOnServer(s -> setProfession((Villager) s.overworld().getEntity(worker), VillagerProfession.LIBRARIAN));
+    c.waitFor(mc -> VerdictService.eligible((Villager) mc.level.getEntity(worker)));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.scan();
+      service.tick();
+      if (service.record(worker) == null || service.record(worker).snapshot() != null
+          || !service.markers.containsKey(worker))
+        throw new AssertionError("regained profession did not start fresh");
+    });
+    server.runOnServer(s -> setProfession((Villager) s.overworld().getEntity(worker), VillagerProfession.NONE));
+    c.waitFor(mc -> !VerdictService.eligible((Villager) mc.level.getEntity(worker)));
+    c.runOnClient(mc -> {
+      VerdictService.INSTANCE.tick();
+      // The next scenario exercises quarantine independently.
+      VerdictService.INSTANCE.probe.reset();
+    });
+    server.runOnServer(s -> ids.forEach(id -> s.overworld().getEntity(id).discard()));
+    c.waitFor(mc -> ids.stream().noneMatch(id -> mc.level.getEntity(id) != null));
+    System.out.println("VV_WORKER_FILTER_OUTLINE_PASS eligibility, profession transitions, snapshots, master switch, vanilla glow, wall");
+  }
+
   private Settings withDataset(Settings s, String dataset) {
-    return new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(), s.outlines(),
-        s.throughWalls(), s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), s.autoScan(),
+    return new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(), s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), s.autoScan(),
         s.markerLimit(), s.textRange(), s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(),
         s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), dataset);
   }

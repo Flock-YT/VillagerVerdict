@@ -10,7 +10,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /** In-mod editor for the Villager Verdict key mappings. */
-public final class ShortcutScreen extends Screen {
+public final class ShortcutScreen extends WorldScreen {
     private final Screen parent;
     private final List<VillagerverdictClient.Shortcut> shortcuts = VillagerverdictClient.shortcuts();
     private final ShortcutManager manager = VillagerverdictClient.shortcutManager();
@@ -92,7 +92,6 @@ public final class ShortcutScreen extends Screen {
     }
 
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
-        graphics.fill(0, 0, width, height, 0xF0181E2B);
         graphics.centeredText(font, title, width / 2, 12, 0xFFFFFFFF);
         int y = 28;
         for (var line : font.split(Component.translatable("vv.shortcutHelp"), width - 24)) {
@@ -107,9 +106,5 @@ public final class ShortcutScreen extends Screen {
 
     public void onClose() {
         minecraft.gui.setScreen(parent);
-    }
-
-    public boolean isPauseScreen() {
-        return false;
     }
 }

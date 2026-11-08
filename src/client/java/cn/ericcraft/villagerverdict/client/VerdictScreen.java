@@ -8,11 +8,10 @@ import cn.ericcraft.villagerverdict.model.AnalysisResult.*;
 import java.util.*;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.*;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
-public final class VerdictScreen extends Screen {
+public final class VerdictScreen extends WorldScreen {
   private final VerdictService s = VerdictService.INSTANCE;
   private int page, offset, detailOffset, sort, filter;
   private EditBox searchBox;
@@ -481,7 +480,6 @@ public final class VerdictScreen extends Screen {
   }
 
   public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float delta) {
-    g.fill(0, 0, width, height, 0xF0181E2B);
     g.centeredText(font, title, width / 2, 8, 0xFFFFFFFF);
     icons.clear();
     if (page == 0) {
@@ -496,7 +494,9 @@ public final class VerdictScreen extends Screen {
                   st.get("active"),
                   st.get("nontrading"))
               .getString();
-      g.text(font, font.plainSubstrByWidth(text, width - 24), 12, height - 40, 0xFFBBD0E8);
+      String visible = font.plainSubstrByWidth(text, width - 24);
+      g.fill(10, height - 54, 14 + font.width(visible), height - 41, 0x99303A50);
+      g.text(font, visible, 12, height - 52, 0xFFBBD0E8);
     }
     if (page == 1) details(g, 12, top() - 20, width - 24, height - top() - 42);
     super.extractRenderState(g, mx, my, delta);
@@ -836,9 +836,5 @@ public final class VerdictScreen extends Screen {
           e.key() == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEDOWN ? -5 : 5);
     }
     return super.keyPressed(e);
-  }
-
-  public boolean isPauseScreen() {
-    return false;
   }
 }

@@ -10,6 +10,10 @@ The user's current Minecraft launch directory is:
 - Before deleting files or making any other changes in this directory, ask the user and obtain explicit authorization for the proposed changes. This includes creating, editing, overwriting, moving, or renaming files, even when the change appears non-destructive.
 - This requirement also applies to changes made indirectly through scripts, build tasks, or applications. Permission to access the directory alone does not authorize changes.
 
+## Development Data Policy
+
+Treat this module as a clean, not-yet-released environment during development. Historical data compatibility, migration, and fallback behavior are not required. Breaking changes are allowed; prefer the best implementation over preserving old formats or behavior. This does not override the Minecraft launch directory access rules above.
+
 ## Project Structure & Module Organization
 
 This is a Fabric client mod for Minecraft 26.3, built with Gradle and Loom. Production code is split by environment:
