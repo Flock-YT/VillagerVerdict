@@ -1,34 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="cn.ericcraft.villagerverdict.AnalysisTest" tests="29" skipped="0" failures="0" errors="0" timestamp="2026-11-08T12:39:35.643Z" hostname="Mac-Mini.local" time="0.032">
+<testsuite name="cn.ericcraft.villagerverdict.AnalysisTest" tests="30" skipped="0" failures="0" errors="0" timestamp="2026-11-08T15:09:43.162Z" hostname="Mac-Mini.local" time="0.064">
   <properties/>
-  <testcase name="backupsCountDistinctVillagers()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.012"/>
-  <testcase name="regionIsThreeDimensionalAndInclusive()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
-  <testcase name="crossTradeCoverage()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.004"/>
+  <testcase name="backupsCountDistinctVillagers()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.027"/>
+  <testcase name="regionIsThreeDimensionalAndInclusive()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.002"/>
+  <testcase name="crossTradeCoverage()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.007"/>
   <testcase name="staleRecommendedRecordStillNeedsReview()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
   <testcase name="unknownCurrencyNeverBecomesFree()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
-  <testcase name="higherLevelWinsRegardlessOfPrice()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
+  <testcase name="higherLevelWinsRegardlessOfPrice()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
   <testcase name="priceOrderingIsNumeric()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
-  <testcase name="deterministicAcrossInputOrder()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
+  <testcase name="deterministicAcrossInputOrder()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.002"/>
   <testcase name="protectedIsAlwaysRetained()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
-  <testcase name="highestLevelAboveCapStillRetained()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
+  <testcase name="highestLevelAboveCapStillRetained()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.002"/>
   <testcase name="futureTradesReduceConfidence()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
-  <testcase name="duplicateOffersDoNotCreateBackups()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
+  <testcase name="duplicateOffersDoNotCreateBackups()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
   <testcase name="backupOverPriceCapReportsGap()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
-  <testcase name="unloadedReplacementCannotConfirm()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
+  <testcase name="unloadedReplacementCannotConfirm()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
   <testcase name="excludedReportsGap()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
-  <testcase name="targetBackupCanUseDifferentPrices()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
+  <testcase name="targetBackupCanUseDifferentPrices()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
   <testcase name="currenciesIncomparable()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
-  <testcase name="stockDoesNotEraseLongTermValue()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
+  <testcase name="stockDoesNotEraseLongTermValue()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
   <testcase name="moreExpensiveBackupStillCoversCommodity()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
   <testcase name="explanationContainsUUIDAndDifferences()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
-  <testcase name="repeatedInputResourceAggregates()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
+  <testcase name="repeatedInputResourceAggregates()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
   <testcase name="normalizesPerOutput()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
-  <testcase name="componentsDoNotCollapse()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
-  <testcase name="targetOnlyExcludesUnrelatedCoverage()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
+  <testcase name="componentsDoNotCollapse()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
+  <testcase name="vectorOrderComparesEveryInput()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
+  <testcase name="targetOnlyExcludesUnrelatedCoverage()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
   <testcase name="sameLevelUsesPrice()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
   <testcase name="enchantmentTradeoffsDoNotDominate()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
   <testcase name="protectedRecordOverridesStaleness()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
-  <testcase name="twoInputsUseVector()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
+  <testcase name="twoInputsUseVector()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.001"/>
   <testcase name="uninspectedIsYellow()" classname="cn.ericcraft.villagerverdict.AnalysisTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

@@ -183,6 +183,38 @@ class StorageTest {
   }
 
   @Test
+  void clearingVillagersPreservesWorldConfiguration() {
+    var target =
+        new TargetTrade("target", "minecraft:enchanted_book", "minecraft:sharpness", 1, 0, 1);
+    var region =
+        new TradingHallRegion(
+            "region",
+            "Hall",
+            id.dimension(),
+            0,
+            0,
+            0,
+            10,
+            10,
+            10,
+            List.of(target),
+            0xFF99AAFF);
+    var data =
+        new WorldData(
+            2,
+            id,
+            List.of(AnalysisTest.v(1, AnalysisTest.trade(5, AnalysisTest.book(4)))),
+            List.of(target),
+            List.of(region));
+
+    var cleared = data.clearVillagers();
+    assertTrue(cleared.villagers().isEmpty());
+    assertEquals(data.identity(), cleared.identity());
+    assertEquals(data.targets(), cleared.targets());
+    assertEquals(data.regions(), cleared.regions());
+  }
+
+  @Test
   void configurationVersionOneMigrates() throws Exception {
     var p = dir.resolve("v1.json");
     try (var s = new JsonStore(e -> fail(e))) {

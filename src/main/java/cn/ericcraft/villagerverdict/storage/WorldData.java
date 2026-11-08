@@ -24,4 +24,9 @@ public record WorldData(
   public static WorldData empty(WorldIdentity id) {
     return new WorldData(2, id, List.of(), List.of(), List.of());
   }
+
+  /** Returns this world's configuration with all villager records removed. */
+  public WorldData clearVillagers() {
+    return new WorldData(version, identity, List.of(), targets, regions);
+  }
 }

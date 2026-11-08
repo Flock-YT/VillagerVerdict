@@ -1,11 +1,11 @@
-# 67 项实施对照
+# 69 项实施对照
 
-本表依据本次实施计划给出的编号范围拆分索引；未收到独立的原始 67 条任务书全文，条目名称是本计划内的实施描述，不声称逐字还原原任务书。所有行均有业务代码，验证程度单独列明；“代码”或“未验证”不等于实测通过。
+本表保留原有 67 项能力索引，并追加本次的快捷键管理和数据清理功能。所有行均有业务代码，验证程度单独列明；“代码”或“未验证”不等于实测通过。
 
 | 编号 | 能力 | 实现位置（类/方法） | 验证边界 |
 |---|---|---|---|
 | 01 | 实体加载/卸载索引 | `VerdictService.load/unload` | 集成：301 实体 |
-| 02 | 三维距离附近清单 | `VerdictService.scan` | 集成：实体扫描；距离边界未专项实测 |
+| 02 | 三维距离附近清单 | `VerdictService.scan` | 集成：48 格半径内 47 格与半径外 49 格对象 |
 | 03 | 20 tick / 80 格默认及手动扫描 | `Settings / VerdictService.scan` | 集成：主动扫描 |
 | 04 | 注册表职业和等级 | `VerdictService.scan` | 集成：图书管理员及无业 |
 | 05 | 幼年/无业/傻子排除探测 | `VillagerRecord.tradable` | 代码；无业集成，幼年/傻子未专项实测 |
@@ -37,8 +37,8 @@
 | 31 | 绿/黄/红状态 | `AnalysisResult / Optimizer / renderer` | 单元及普通世界截图 |
 | 32 | 高/中/低置信度与未来交易风险 | `Optimizer` | 单元 |
 | 33 | 替代 UUID/坐标/交易/价差及跳转 | `ComparisonResult / VerdictScreen.details` | 单元；点击跳转未专项实测 |
-| 34 | 状态标记 | `EntityRendererMixin / prepared Marker` | 301 场景；视觉细节未完整验收 |
-| 35 | 头顶摘要 | `VerdictService.prepareMarkers` | 代码与场景截图 |
+| 34 | 扫描半径内全部村民状态标记 | `EntityRendererMixin / prepared Marker` | 301 场景；视觉细节未完整验收 |
+| 35 | 扫描半径内头顶摘要，不受玩家距离截断 | `VerdictService.prepareMarkers` | 代码与场景截图 |
 | 36 | 彩色实体轮廓 | `EntityRendererMixin` | 代码；各色轮廓未专项实测 |
 | 37 | 独立隔墙模式，默认关闭 | `Settings / EntityRendererMixin` | 默认与代码；隔墙视觉未验证 |
 | 38 | 各元素独立开关和总开关 | `Settings.statusMarks/summaries/outlines/markers` | 配置与原生控件；全组合未验证 |
@@ -66,11 +66,14 @@
 | 60 | 无界面保留菜单同步并安全关闭 | `GuiMixin / PacketListenerMixin / VerdictService` | 真实交易包与菜单集成 |
 | 61 | 人工优先、错配停止、世界切换取消 | `ProbeController / Fabric callbacks` | 单元和世界切换；真实争用未验证 |
 | 62 | 可解释的分项综合排序，无统一线性分 | `Optimizer.prefer / VerdictScreen.filtered` | 单元和代码；不承诺数学最优 |
-| 63 | F8/F9/F10 原版键设置及默认未绑定项 | `VillagerverdictClient` | 注册代码；物理快捷键未逐个测试 |
+| 63 | 原版仅注册 F8 管理键，其他项由模组管理 | `VillagerverdictClient / ShortcutScreen` | 原版列表仅一项；中英文分类名；框架模拟改绑、清除和重置 |
 | 64 | 宽屏并排/窄屏分页、滚动、键盘焦点 | `VerdictScreen / FormScreen` | 宽窄截图；全键盘路径未验证 |
-| 65 | 32 格文字/128 标记/选中优先 | `Settings / prepareMarkers` | 默认与 301 场景；选中远目标未专项测试 |
+| 65 | 扫描半径控制标记范围、选中优先 | `Settings / prepareMarkers` | 301 场景全部标记；旧上限/距离设为 1 仍标记远处对象 |
 | 66 | 中英文和物品随当前语言显示 | `lang/en_us.json / zh_cn.json / ItemCodecAdapter` | 真实资源重载及双语截图 |
 | 67 | 目标提示、声音及价格/解锁/库存变更去重 | `SnapshotDelta / fingerprint / notifyChanges` | 变化和语言去重单元；声画提醒未专项实测 |
+
+| 68 | 按世界或服务器清空村民记录并保留配置 | `DataScreen / VerdictService / WorldData` | 单元隔离和配置保留；真实 GUI 确认/取消、清理和重扫 |
+| 69 | 管理页快捷键改绑、清除和恢复默认 | `ShortcutScreen` | 旧 options 不恢复 F9/F10；独立文件及新控制器恢复；原版与模组管理键同步 |
 
 ## 20 项职责边界
 

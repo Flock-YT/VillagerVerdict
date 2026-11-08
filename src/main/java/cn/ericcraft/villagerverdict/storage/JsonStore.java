@@ -1,5 +1,6 @@
 package cn.ericcraft.villagerverdict.storage;
 
+import cn.ericcraft.villagerverdict.model.WorldIdentity;
 import com.google.gson.*;
 import java.io.*;
 import java.nio.channels.FileChannel;
@@ -47,6 +48,64 @@ public final class JsonStore implements AutoCloseable {
           }
         },
         worker);
+  }
+
+  /** Reads world files on the writer thread; unreadable or mismatched files stay protected. */
+  public CompletableFuture<List<WorldData>> worlds(Path directory) {
+    return CompletableFuture.supplyAsync(
+        () -> {
+          drain();
+          return worldFiles(directory).values().stream().toList();
+        },
+        worker);
+  }
+
+  /** Completes only after all matching valid files have been atomically rewritten. */
+  public CompletableFuture<Integer> clearVillagers(
+      Path directory, Predicate<WorldIdentity> matches) {
+    return CompletableFuture.supplyAsync(
+        () -> {
+          drain();
+          int count = 0;
+          for (var entry : worldFiles(directory).entrySet()) {
+            if (!matches.test(entry.getValue().identity())) continue;
+            try {
+              atomic(entry.getKey(), gson.toJson(entry.getValue().clearVillagers()));
+              count++;
+            } catch (IOException e) {
+              errors.accept(e);
+              throw new CompletionException(e);
+            }
+          }
+          return count;
+        },
+        worker);
+  }
+
+  private Map<Path, WorldData> worldFiles(Path directory) {
+    if (!Files.exists(directory)) return Map.of();
+    var result = new LinkedHashMap<Path, WorldData>();
+    try (var paths = Files.list(directory)) {
+      for (var path : paths
+          .filter(p -> Files.isRegularFile(p) && p.getFileName().toString().endsWith(".json"))
+          .sorted()
+          .toList()) {
+        try (var reader = Files.newBufferedReader(path)) {
+          var data = gson.fromJson(reader, WorldData.class);
+          if (data == null || !path.getFileName().toString().equals(fileKey(data.identity()) + ".json"))
+            throw new IOException("World identity does not match file " + path);
+          blocked.remove(path);
+          result.put(path, data);
+        } catch (Exception e) {
+          blocked.add(path);
+          errors.accept(e);
+        }
+      }
+    } catch (IOException e) {
+      errors.accept(e);
+      throw new CompletionException(e);
+    }
+    return result;
   }
 
   public synchronized boolean save(Path path, Object immutable) {

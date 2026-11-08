@@ -32,7 +32,11 @@ public final class VerdictScreen extends Screen {
   }
 
   private int top() {
-    return width < 460 ? 104 : 80;
+    return 56 + ((7 + navigationColumns() - 1) / navigationColumns()) * 24;
+  }
+
+  private int navigationColumns() {
+    return width >= 640 ? 7 : width >= 460 ? 4 : 3;
   }
 
   private int listWidth() {
@@ -40,17 +44,28 @@ public final class VerdictScreen extends Screen {
   }
 
   protected void init() {
-    String[] names = {"vv.villagers", "vv.details", "vv.targets", "vv.regions", "vv.settings"};
-    int bw = Math.max(52, (width - 24) / (width < 460 ? 3 : 5));
+    String[] names = {
+      "vv.villagers",
+      "vv.details",
+      "vv.targets",
+      "vv.regions",
+      "vv.settings",
+      "vv.shortcuts",
+      "vv.data"
+    };
+    int columns = navigationColumns();
+    int bw = (width - 24) / columns;
     for (int i = 0; i < names.length; i++) {
       int p = i;
       button(
           Component.translatable(names[i]),
-          12 + (i % (width < 460 ? 3 : 5)) * bw,
-          26 + (i / (width < 460 ? 3 : 5)) * 24,
+          12 + (i % columns) * bw,
+          26 + (i / columns) * 24,
           bw - 3,
           () -> {
             if (p == 4) SettingsScreen.open(this);
+            else if (p == 5) ShortcutScreen.open(this);
+            else if (p == 6) DataScreen.open(this);
             else {
               page = p;
               offset = detailOffset = 0;

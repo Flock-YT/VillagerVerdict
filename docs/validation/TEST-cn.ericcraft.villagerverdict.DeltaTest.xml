@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="cn.ericcraft.villagerverdict.DeltaTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-08T12:39:35.676Z" hostname="Mac-Mini.local" time="0.002">
+<testsuite name="cn.ericcraft.villagerverdict.DeltaTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-08T15:09:43.227Z" hostname="Mac-Mini.local" time="0.004">
   <properties/>
   <testcase name="sameSnapshotHasNoChanges()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.001"/>
   <testcase name="distinguishRestock()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.0"/>
-  <testcase name="distinguishPriceChanges()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.0"/>
+  <testcase name="distinguishPriceChanges()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.001"/>
   <testcase name="localeDoesNotChangeTradeIdentityOrFingerprint()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.001"/>
   <testcase name="distinguishNewTrades()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>

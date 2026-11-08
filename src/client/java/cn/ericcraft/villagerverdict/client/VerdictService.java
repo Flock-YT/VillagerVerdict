@@ -8,6 +8,7 @@ import cn.ericcraft.villagerverdict.probe.*;
 import cn.ericcraft.villagerverdict.storage.*;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.toasts.SystemToast;
@@ -58,6 +59,8 @@ public final class VerdictService {
 
   public record Marker(
       int color, Component text, boolean visible, boolean summary, String symbol) {}
+
+  public record StoredWorld(WorldIdentity identity, int villagers, boolean current) {}
 
   public Map<UUID, Marker> markers = Map.of();
   public Set<UUID> nearby = Set.of();
@@ -146,7 +149,7 @@ public final class VerdictService {
     String dimension = mc.level == null ? null : mc.level.dimension().identifier().toString();
     if (mc.level != level || identity != null && !identity.dataset().equals(settings.dataset()))
       switchWorld(dimension);
-    if (level == null || !ready) return;
+    if (level == null || !ready || clearingCurrentWorld()) return;
     var before = probe.context();
     probe.tick();
     if (before != null && probe.context() == null) restore();
@@ -256,7 +259,8 @@ public final class VerdictService {
                       ready = true;
                       error = "";
                       scan();
-                      if (settings.autoServers().getOrDefault(identity.server(), false)
+                      if (!clearingCurrentWorld()
+                          && settings.autoServers().getOrDefault(identity.server(), false)
                           && settings.acknowledged().contains(identity.server())) probe.run();
                     }));
   }
@@ -265,8 +269,98 @@ public final class VerdictService {
     return root.resolve("worlds").resolve(JsonStore.fileKey(id) + ".json");
   }
 
+  public CompletableFuture<List<StoredWorld>> storedWorlds() {
+    WorldData active = ready && identity != null ? currentWorldData() : null;
+    save();
+    return store.worlds(root.resolve("worlds")).thenApply(data -> {
+      var result = new LinkedHashMap<WorldIdentity, StoredWorld>();
+      for (var world : data)
+        result.put(world.identity(), new StoredWorld(world.identity(), world.villagers().size(),
+            active != null && active.identity().equals(world.identity())));
+      if (active != null)
+        result.put(active.identity(), new StoredWorld(active.identity(), active.villagers().size(), true));
+      return result.values().stream()
+          .sorted(Comparator.comparing((StoredWorld w) -> !w.current())
+              .thenComparing(w -> w.identity().server())
+              .thenComparing(w -> w.identity().dataset())
+              .thenComparing(w -> w.identity().dimension()))
+          .toList();
+    });
+  }
+
+  public CompletableFuture<Integer> clearWorldVillagers(WorldIdentity target) {
+    Objects.requireNonNull(target);
+    return clearStoredVillagers(id -> id.equals(target));
+  }
+
+  public CompletableFuture<Integer> clearServerVillagers(String server) {
+    Objects.requireNonNull(server);
+    return clearStoredVillagers(id -> id.server().equals(server));
+  }
+
+  private java.util.function.Predicate<WorldIdentity> clearingWorlds;
+
+  private boolean clearingCurrentWorld() {
+    return identity != null && clearingWorlds != null && clearingWorlds.test(identity);
+  }
+
+  private CompletableFuture<Integer> clearStoredVillagers(
+      java.util.function.Predicate<WorldIdentity> matches) {
+    if (clearingWorlds != null)
+      return CompletableFuture.failedFuture(new IllegalStateException("Data clear already in progress"));
+    save();
+    clearingWorlds = matches;
+    if (clearingCurrentWorld()) {
+      cancel(State.CANCELLED);
+      probe.reset();
+      analysisRevision++;
+    }
+    var finished = new CompletableFuture<Integer>();
+    store.clearVillagers(root.resolve("worlds"), matches).whenComplete((count, failure) ->
+        mc.execute(() -> {
+          boolean clearActive = clearingCurrentWorld();
+          clearingWorlds = null;
+          if (failure == null) {
+            if (clearActive && ready) resetActiveAfterClear();
+            finished.complete(count);
+          } else {
+            // A partial disk failure must not let stale memory overwrite already cleared files.
+            if (clearActive) {
+              ready = false;
+              switchWorld(identity.dimension());
+            }
+            error = "Could not clear world data";
+            finished.completeExceptionally(failure);
+          }
+        }));
+    return finished;
+  }
+
+  private WorldData currentWorldData() {
+    return new WorldData(2, identity, List.copyOf(records.values()), List.copyOf(targets), List.copyOf(regions));
+  }
+
+  private void resetActiveAfterClear() {
+    cancel(State.CANCELLED);
+    probe.reset();
+    analysisRevision++;
+    records.clear();
+    notifications.clear();
+    staleIds = Set.of();
+    analysis = AnalysisResult.empty();
+    regional = Map.of();
+    markers = Map.of();
+    nearby = Set.of();
+    selected = null;
+    ticks = 0;
+    dirty = false;
+    // Configuration may have been edited after the clear began, while disk work was queued.
+    persistedData = null;
+    save();
+  }
+
   public void scan() {
-    if (mc.player == null || identity == null || !ready) return;
+    if (mc.player == null || identity == null || !ready || clearingCurrentWorld()) return;
     long start = System.nanoTime();
     long now = System.currentTimeMillis();
     var near = new LinkedHashSet<UUID>();
@@ -330,7 +424,7 @@ public final class VerdictService {
   }
 
   public void save() {
-    if (!ready || identity == null) return;
+    if (!ready || identity == null || clearingCurrentWorld()) return;
     var current =
         new WorldData(
             2,
@@ -424,7 +518,7 @@ public final class VerdictService {
       cancel(State.CONFLICT);
       return;
     }
-    if (ready && entity instanceof Villager v)
+    if (ready && !clearingCurrentWorld() && entity instanceof Villager v)
       probe.begin(generation, identity.dimension(), v.getUUID(), v.getId(), Mode.MANUAL);
   }
 
@@ -718,20 +812,20 @@ public final class VerdictService {
     var m = new LinkedHashMap<UUID, Marker>();
     for (var v :
         loaded.values().stream()
+            .filter(v -> nearby.contains(v.getUUID()))
             .sorted(
                 Comparator.<Villager>comparingInt(v -> v.getUUID().equals(selected) ? 0 : 1)
                     .thenComparingDouble(v -> v.distanceToSqr(mc.player)))
-            .limit(settings.markerLimit())
             .toList()) {
       var verdict = analysis.verdicts().get(v.getUUID());
-      if (verdict == null) continue;
       var record = records.get(v.getUUID());
-      var status = verdict.status();
+      var status = verdict == null ? AnalysisResult.Status.REVIEW : verdict.status();
       if (record != null
           && !record.fixed()
           && (record.snapshot() == null
               || snapshotStale(record, System.currentTimeMillis())
-              || status == AnalysisResult.Status.REDUNDANT
+              || verdict != null
+                  && status == AnalysisResult.Status.REDUNDANT
                   && verdict.replacements().stream().anyMatch(r -> !canConfirm(r))))
         status = AnalysisResult.Status.REVIEW;
       int color =
@@ -774,7 +868,7 @@ public final class VerdictService {
               color,
               text,
               visible,
-              v.distanceToSqr(mc.player) <= settings.textRange() * settings.textRange(),
+              true,
               switch (status) {
                 case KEEP -> "+";
                 case REVIEW -> "?";
