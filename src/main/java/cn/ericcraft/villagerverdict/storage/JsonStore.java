@@ -31,10 +31,14 @@ public final class JsonStore implements AutoCloseable {
   public <T> CompletableFuture<T> read(Path path, Class<T> type, Supplier<T> missing) {
     return CompletableFuture.supplyAsync(
         () -> {
-          if (!Files.exists(path)) return missing.get();
+          if (!Files.exists(path)) {
+            blocked.remove(path);
+            return missing.get();
+          }
           try (var r = Files.newBufferedReader(path)) {
             T v = gson.fromJson(r, type);
             if (v == null) throw new IOException("null JSON " + path);
+            blocked.remove(path);
             return v;
           } catch (Exception e) {
             blocked.add(path);
@@ -45,11 +49,12 @@ public final class JsonStore implements AutoCloseable {
         worker);
   }
 
-  public synchronized void save(Path path, Object immutable) {
-    if (blocked.contains(path)) return;
+  public synchronized boolean save(Path path, Object immutable) {
+    if (blocked.contains(path)) return false;
     boolean schedule = pending.isEmpty();
     pending.put(path, immutable);
     if (schedule) worker.submit(this::drain);
+    return true;
   }
 
   private void drain() {

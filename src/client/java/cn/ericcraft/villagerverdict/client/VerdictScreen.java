@@ -2,6 +2,7 @@ package cn.ericcraft.villagerverdict.client;
 
 import static cn.ericcraft.villagerverdict.client.FormScreen.fields;
 
+import cn.ericcraft.villagerverdict.analysis.TradeComparison;
 import cn.ericcraft.villagerverdict.model.*;
 import cn.ericcraft.villagerverdict.model.AnalysisResult.*;
 import java.util.*;
@@ -364,14 +365,9 @@ public final class VerdictScreen extends Screen {
           case 1 ->
               Comparator.comparing(
                       (VillagerRecord v) ->
-                          v.snapshot() == null
-                              ? "~"
-                              : v.snapshot().trades().stream()
-                                  .map(t -> new TreeSet<>(t.cost(false).keySet()).toString())
-                                  .sorted()
-                                  .findFirst()
-                                  .orElse("~"))
-                  .thenComparingDouble(this::price);
+                          priceGroup(v))
+                  .thenComparing(
+                      (a, b) -> TradeComparison.vectorOrder(priceVector(a), priceVector(b)));
           case 2 -> Comparator.<VillagerRecord>comparingInt(this::enchantment).reversed();
           case 3 -> Comparator.comparingDouble(s::distanceSquared);
           case 4 -> Comparator.comparing(VillagerRecord::profession);
@@ -412,13 +408,24 @@ public final class VerdictScreen extends Screen {
         .toLowerCase(Locale.ROOT);
   }
 
-  private double price(VillagerRecord v) {
+  private Map<String, Double> priceVector(VillagerRecord v) {
+    if (v.snapshot() == null) return Map.of();
+    String group = priceGroup(v);
+    return v.snapshot().trades().stream()
+        .filter(t -> new TreeSet<>(t.cost(false).keySet()).toString().equals(group))
+        .map(t -> t.cost(false))
+        .min(TradeComparison::vectorOrder)
+        .orElse(Map.of());
+  }
+
+  private String priceGroup(VillagerRecord v) {
     return v.snapshot() == null
-        ? Double.POSITIVE_INFINITY
+        ? "~"
         : v.snapshot().trades().stream()
-            .mapToDouble(t -> t.baseInput().count() / (double) t.output().count())
-            .min()
-            .orElse(Double.POSITIVE_INFINITY);
+            .map(t -> new TreeSet<>(t.cost(false).keySet()).toString())
+            .sorted()
+            .findFirst()
+            .orElse("~");
   }
 
   private int enchantment(VillagerRecord v) {

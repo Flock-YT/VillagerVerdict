@@ -69,6 +69,24 @@ class StorageTest {
   }
 
   @Test
+  void repairedOrMissingFileUnblocksWrites() throws Exception {
+    var path = dir.resolve("repaired.json");
+    Files.writeString(path, "broken { original");
+    try (var s = new JsonStore(e -> {})) {
+      assertThrows(
+          ExecutionException.class,
+          () -> s.read(path, Settings.class, Settings::defaults).get());
+      assertTrue(s.blocked(path));
+      Files.delete(path);
+      assertEquals(Settings.defaults(), s.read(path, Settings.class, Settings::defaults).get());
+      assertFalse(s.blocked(path));
+      s.save(path, Settings.defaults());
+      s.flush().get();
+      assertEquals(Settings.defaults(), s.read(path, Settings.class, Settings::defaults).get());
+    }
+  }
+
+  @Test
   void nullFileProtected() throws Exception {
     var p = dir.resolve("null.json");
     Files.writeString(p, "null");
@@ -172,12 +190,30 @@ class StorageTest {
       s.flush().get();
       String json =
           Files.readString(p)
-              .replace("\"version\": 2", "\"version\": 1")
+              .replace("\"version\": 3", "\"version\": 1")
               .replace("\"statusMarks\": true,", "");
       Files.writeString(p, json);
       var settings = s.read(p, Settings.class, Settings::defaults).get();
-      assertEquals(2, settings.version());
+      assertEquals(3, settings.version());
       assertTrue(settings.statusMarks());
+      assertTrue(settings.autoScan());
+    }
+  }
+
+  @Test
+  void configurationVersionTwoDefaultsAutoScanOn() throws Exception {
+    var p = dir.resolve("v2.json");
+    try (var s = new JsonStore(e -> fail(e))) {
+      s.save(p, Settings.defaults());
+      s.flush().get();
+      String json =
+          Files.readString(p)
+              .replace("\"version\": 3", "\"version\": 2")
+              .replace("\"autoScan\": true,", "");
+      Files.writeString(p, json);
+      var settings = s.read(p, Settings.class, Settings::defaults).get();
+      assertEquals(3, settings.version());
+      assertTrue(settings.autoScan());
     }
   }
 }

@@ -14,6 +14,7 @@ public record Settings(
     int red,
     int radius,
     int scanTicks,
+    boolean autoScan,
     int markerLimit,
     int textRange,
     long cacheMillis,
@@ -31,7 +32,11 @@ public record Settings(
       statusMarks = true;
       version = 2;
     }
-    if (version != 2
+    if (version == 2) {
+      autoScan = true;
+      version = 3;
+    }
+    if (version != 3
         || radius < 1
         || radius > 1024
         || scanTicks < 1
@@ -46,7 +51,7 @@ public record Settings(
 
   public static Settings defaults() {
     return new Settings(
-        2,
+        3,
         true,
         true,
         true,
@@ -57,6 +62,7 @@ public record Settings(
         0xFFFF6677,
         80,
         20,
+        true,
         128,
         32,
         1800000,
@@ -86,6 +92,7 @@ public record Settings(
         red,
         radius,
         scanTicks,
+        autoScan,
         markerLimit,
         textRange,
         cacheMillis,

@@ -69,6 +69,7 @@ public final class ProbeController {
   }
 
   public void run() {
+    if (!running) timeouts = 0;
     running = true;
   }
 
@@ -165,7 +166,10 @@ public final class ProbeController {
 
   public void cancel(State reason) {
     if (context != null) finish(reason, false);
-    else last = reason;
+    else {
+      if (reason != State.TIMEOUT) timeouts = 0;
+      last = reason;
+    }
   }
 
   public void reset() {
@@ -187,6 +191,7 @@ public final class ProbeController {
   private void finish(State state, boolean failure) {
     if (context == null) return;
     var c = context;
+    if (state != State.TIMEOUT) timeouts = 0;
     if (failure) {
       int n = failures.merge(c.uuid, 1, Integer::sum);
       cooldown.put(c.uuid, clock.getAsLong() + Math.min(300000, 30000L << (Math.min(n - 1, 4))));

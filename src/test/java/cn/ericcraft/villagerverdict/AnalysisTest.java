@@ -78,6 +78,20 @@ class AnalysisTest {
   }
 
   @Test
+  void vectorOrderComparesEveryInput() {
+    var cheaperSecond =
+        new Trade(
+            item("emerald", 1), item("emerald", 1), item("diamond", 2), item("apple", 1), 0, 10);
+    var moreExpensiveSecond =
+        new Trade(
+            item("emerald", 1), item("emerald", 1), item("diamond", 3), item("apple", 1), 0, 10);
+    assertTrue(
+        TradeComparison.vectorOrder(
+                cheaperSecond.cost(false), moreExpensiveSecond.cost(false))
+            < 0);
+  }
+
+  @Test
   void repeatedInputResourceAggregates() {
     var t =
         new Trade(

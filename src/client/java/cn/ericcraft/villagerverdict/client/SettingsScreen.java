@@ -34,6 +34,8 @@ public final class SettingsScreen {
             "" + s.radius(),
             "vv.scanTicks",
             "" + s.scanTicks(),
+            "vv.autoScan",
+            "" + s.autoScan(),
             "vv.markerLimit",
             "" + s.markerLimit(),
             "vv.textRange",
@@ -60,7 +62,7 @@ public final class SettingsScreen {
                 m -> {
                   service.settings(
                       new Settings(
-                          2,
+                          3,
                           bool(m, "vv.markers"),
                           bool(m, "vv.statusMarks"),
                           bool(m, "vv.summaries"),
@@ -71,6 +73,7 @@ public final class SettingsScreen {
                           color(m, "vv.red"),
                           integer(m, "vv.radius"),
                           integer(m, "vv.scanTicks"),
+                          bool(m, "vv.autoScan"),
                           integer(m, "vv.markerLimit"),
                           integer(m, "vv.textRange"),
                           Long.parseLong(m.get("vv.cacheMillis")),
@@ -105,7 +108,7 @@ public final class SettingsScreen {
     var s = service.settings;
     service.settings(
         new Settings(
-            2,
+            3,
             !s.markers(),
             s.statusMarks(),
             s.summaries(),
@@ -116,6 +119,7 @@ public final class SettingsScreen {
             s.red(),
             s.radius(),
             s.scanTicks(),
+            s.autoScan(),
             s.markerLimit(),
             s.textRange(),
             s.cacheMillis(),

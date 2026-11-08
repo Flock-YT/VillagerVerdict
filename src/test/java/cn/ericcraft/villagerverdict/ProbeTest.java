@@ -121,8 +121,8 @@ class ProbeTest {
 
   @Test
   void threeTimeoutsDisable() {
+    p.run();
     for (int i = 0; i < 3; i++) {
-      p.run();
       time.addAndGet(100000);
       assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
       time.addAndGet(5000);
@@ -130,6 +130,45 @@ class ProbeTest {
     }
     assertFalse(p.running());
     assertEquals(State.TIMEOUT, p.state());
+  }
+
+  @Test
+  void restartingResetsTimeoutStreak() {
+    p.run();
+    for (int i = 0; i < 3; i++) {
+      time.addAndGet(100000);
+      assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
+      time.addAndGet(5000);
+      p.tick();
+    }
+    assertFalse(p.running());
+    time.addAndGet(300000);
+    p.run();
+    assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
+    time.addAndGet(5000);
+    p.tick();
+    assertTrue(p.running());
+  }
+
+  @Test
+  void rejectionResetsTimeoutStreak() {
+    p.run();
+    for (int i = 0; i < 2; i++) {
+      time.addAndGet(100000);
+      assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
+      time.addAndGet(5000);
+      p.tick();
+    }
+    time.addAndGet(300000);
+    assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
+    p.rejected();
+    for (int i = 0; i < 2; i++) {
+      time.addAndGet(300000);
+      assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
+      time.addAndGet(5000);
+      p.tick();
+    }
+    assertTrue(p.running());
   }
 
   @Test

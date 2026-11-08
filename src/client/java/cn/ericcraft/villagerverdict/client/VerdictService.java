@@ -75,6 +75,7 @@ public final class VerdictService {
   private boolean ready, dirty, autoDispatch, restoring, contentSynced, settingsReady;
   private MerchantScreen suppressed;
   private Set<UUID> staleIds = Set.of();
+  private WorldData persistedData;
   public String error = "";
 
   public void init() {
@@ -155,7 +156,7 @@ public final class VerdictService {
         && (mc.player.isShiftKeyDown()
             || !mc.player.getMainHandItem().isEmpty()
             || !mc.player.getOffhandItem().isEmpty())) cancel(State.CONFLICT);
-    if (++ticks % settings.scanTicks() == 0) scan();
+    if (++ticks % settings.scanTicks() == 0 && settings.autoScan()) scan();
 
     if (dirty && !analysisInFlight) {
       dirty = false;
@@ -188,7 +189,7 @@ public final class VerdictService {
         if (r == null
             || !r.tradable()
             || r.snapshot() != null
-                && !r.snapshot().stale(System.currentTimeMillis(), settings.cacheMillis())
+                && !snapshotStale(r, System.currentTimeMillis())
             || !probe.eligible(v.getUUID())) continue;
         Vec3 point = hitPoint(v);
         if (point == null) continue;
@@ -215,6 +216,7 @@ public final class VerdictService {
     probe.reset();
     loaded.clear();
     records.clear();
+    persistedData = null;
     targets = new ArrayList<>();
     regions = new ArrayList<>();
     analysis = AnalysisResult.empty();
@@ -247,6 +249,7 @@ public final class VerdictService {
                         error = "World identity mismatch";
                         return;
                       }
+                      persistedData = data;
                       data.villagers().forEach(v -> records.put(v.uuid(), v));
                       targets = new ArrayList<>(data.targets());
                       regions = new ArrayList<>(data.regions());
@@ -270,33 +273,46 @@ public final class VerdictService {
     for (var v : loaded.values()) {
       var old = records.get(v.getUUID());
       var d = v.getVillagerData();
-      if (old == null
-          || old.level() != d.level()
-          || !old.profession().equals(d.profession().getRegisteredName())
-          || old.baby() != v.isBaby()) dirty = true;
-      records.put(
-          v.getUUID(),
+      boolean levelChanged =
+          old == null
+              || old.level() != d.level()
+              || old.snapshot() != null && old.snapshot().level() != d.level();
+      boolean metadataChanged =
+          old == null
+              || levelChanged
+              || !old.profession().equals(d.profession().getRegisteredName())
+              || old.baby() != v.isBaby();
+      boolean positionChanged =
+          old == null
+              || Double.compare(old.x(), v.getX()) != 0
+              || Double.compare(old.y(), v.getY()) != 0
+              || Double.compare(old.z(), v.getZ()) != 0;
+      var current =
           new VillagerRecord(
               identity,
               v.getUUID(),
               d.profession().getRegisteredName(),
               d.level(),
               v.isBaby(),
-              v.getX(),
-              v.getY(),
-              v.getZ(),
-              now,
-              old == null ? null : old.snapshot(),
+              positionChanged ? v.getX() : old.x(),
+              positionChanged ? v.getY() : old.y(),
+              positionChanged ? v.getZ() : old.z(),
+              metadataChanged || positionChanged ? now : old.lastSeen(),
+              old == null || levelChanged ? null : old.snapshot(),
               old == null ? VillagerRecord.Manual.AUTO : old.manual(),
               old == null ? "" : old.note(),
-              old == null ? Set.of() : old.tags()));
+              old == null ? Set.of() : old.tags());
+      if (!current.equals(old)) {
+        records.put(v.getUUID(), current);
+        dirty = true;
+      }
       if (v.distanceToSqr(mc.player) <= settings.radius() * settings.radius())
         near.add(v.getUUID());
     }
     nearby = Set.copyOf(near);
     var stale =
         records.values().stream()
-            .filter(v -> v.snapshot() != null && v.snapshot().stale(now, settings.cacheMillis()))
+            .filter(v -> snapshotStale(v, now))
             .map(VillagerRecord::uuid)
             .collect(java.util.stream.Collectors.toSet());
     if (!stale.equals(staleIds)) {
@@ -307,16 +323,23 @@ public final class VerdictService {
     scanNanos = System.nanoTime() - start;
   }
 
+  private boolean snapshotStale(VillagerRecord record, long now) {
+    var snapshot = record.snapshot();
+    return snapshot != null
+        && (snapshot.level() != record.level() || snapshot.stale(now, settings.cacheMillis()));
+  }
+
   public void save() {
-    if (ready && identity != null)
-      store.save(
-          dataPath(identity),
-          new WorldData(
-              2,
-              identity,
-              List.copyOf(records.values()),
-              List.copyOf(targets),
-              List.copyOf(regions)));
+    if (!ready || identity == null) return;
+    var current =
+        new WorldData(
+            2,
+            identity,
+            List.copyOf(records.values()),
+            List.copyOf(targets),
+            List.copyOf(regions));
+    if (current.equals(persistedData)) return;
+    if (store.save(dataPath(identity), current)) persistedData = current;
   }
 
   public void settings(Settings s) {
@@ -472,6 +495,28 @@ public final class VerdictService {
                       : TradeSnapshot.Completeness.UNLOCKED_LEVELS_REMAIN)
                   : TradeSnapshot.Completeness.UNKNOWN);
       var old = records.get(c.uuid());
+      if (old == null) {
+        var v = loaded.get(c.uuid());
+        if (v != null) {
+          var d = v.getVillagerData();
+          old =
+              new VillagerRecord(
+                  identity,
+                  v.getUUID(),
+                  d.profession().getRegisteredName(),
+                  d.level(),
+                  v.isBaby(),
+                  v.getX(),
+                  v.getY(),
+                  v.getZ(),
+                  System.currentTimeMillis(),
+                  null,
+                  VillagerRecord.Manual.AUTO,
+                  "",
+                  Set.of());
+          records.put(v.getUUID(), old);
+        }
+      }
       if (old != null) {
         records.put(c.uuid(), old.withSnapshot(snap));
         notifyChanges(old, snap);
@@ -570,7 +615,7 @@ public final class VerdictService {
         && loaded.containsKey(r.replacement())
         && v != null
         && v.snapshot() != null
-        && !v.snapshot().stale(System.currentTimeMillis(), settings.cacheMillis());
+        && !snapshotStale(v, System.currentTimeMillis());
   }
 
   public void pause() {
@@ -594,8 +639,7 @@ public final class VerdictService {
                     loaded.containsKey(v.uuid())
                         && v.tradable()
                         && (v.snapshot() == null
-                            || v.snapshot()
-                                .stale(System.currentTimeMillis(), settings.cacheMillis())))
+                            || snapshotStale(v, System.currentTimeMillis())))
             .min(Comparator.comparingDouble(this::distanceSquared))
             .map(VillagerRecord::uuid)
             .orElse(null);
@@ -616,7 +660,7 @@ public final class VerdictService {
         else if (v.uuid().equals(active)) {
         } else if (probe.failureCount(v.uuid()) > 0) failed++;
         else if (v.snapshot() != null
-            && !v.snapshot().stale(System.currentTimeMillis(), settings.cacheMillis())) success++;
+            && !snapshotStale(v, System.currentTimeMillis())) success++;
         else pending++;
       }
     return Map.of(
@@ -686,7 +730,7 @@ public final class VerdictService {
       if (record != null
           && !record.fixed()
           && (record.snapshot() == null
-              || record.snapshot().stale(System.currentTimeMillis(), settings.cacheMillis())
+              || snapshotStale(record, System.currentTimeMillis())
               || status == AnalysisResult.Status.REDUNDANT
                   && verdict.replacements().stream().anyMatch(r -> !canConfirm(r))))
         status = AnalysisResult.Status.REVIEW;
