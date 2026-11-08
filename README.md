@@ -4,7 +4,7 @@ Minecraft 26.3 的 Fabric 客户端模组，用于记录村民交易、比较商
 
 ## 安装与使用
 
-需要 Java 25、Minecraft 26.3、Fabric Loader 0.20.1 和 Fabric API 0.165.2+26.3。将 `build/libs/VillagerVerdict-1.0.0.jar` 与对应 Fabric API 放入客户端 `mods` 目录。不需要额外运行库。请使用匹配的 Minecraft 版本。
+需要 Java 25、Minecraft 26.3、Fabric Loader 0.19.5 和 Fabric API 0.163.0+26.3。将 `build/libs/VillagerVerdict-1.0.0.jar` 与对应 Fabric API 放入客户端 `mods` 目录。不需要额外运行库。请使用匹配的 Minecraft 版本。面向 Minecraft 26.4 的模组（例如 `gugle-carpet-addition` 的 26.4 snapshot 构建）不能与此版本同时加载；请移除它或换用 26.3 构建。
 
 - F8 打开管理界面；F9 立即扫描；F10 切换全部世界标记。导航和探测快捷键默认未绑定，可在原版按键设置中修改。
 - 右键村民正常打开交易窗口后，模组记录服务器同步的当前交易。不会推测尚未解锁的交易。

@@ -16,9 +16,9 @@ JAVA_HOME='/Users/eric/.sdkman/candidates/java/25.0.5.0+8-zulu' ./gradlew clean 
 
 两条命令最终均为 `BUILD SUCCESSFUL`。干净构建没有跳过测试。客户端集成测试是单独运行的任务，不伪装为 `build` 自动覆盖的内容。`runClient` 也曾启动成功，窗口创建、资源加载和 Mixin 应用成功；由于 UI 工具不能连接独立 Java 进程，后续交互验证改用 Fabric 官方客户端测试框架。
 
-成品：[VillagerVerdict-1.0.0.jar](build/libs/VillagerVerdict-1.0.0.jar)，129,541 字节。
+成品：[VillagerVerdict-1.0.0.jar](build/libs/VillagerVerdict-1.0.0.jar)，130,673 字节。
 
-SHA-256：`7e9b5f3d174a23fd61a362a2626c21789e2c9e9868a3393df97de3a58c8610bb`。
+SHA-256：`139f0bc7cf2962a55e87d716c631fffcff7c3547eaff35ea8568a8f2bd443c27`。
 
 ## 自动测试
 

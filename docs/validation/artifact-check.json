@@ -1,7 +1,7 @@
 {
   "artifact": "/Users/eric/Documents/IdeaProjects/VillagerVerdict/build/libs/VillagerVerdict-1.0.0.jar",
-  "bytes": 129541,
-  "sha256": "7e9b5f3d174a23fd61a362a2626c21789e2c9e9868a3393df97de3a58c8610bb",
+  "bytes": 130673,
+  "sha256": "139f0bc7cf2962a55e87d716c631fffcff7c3547eaff35ea8568a8f2bd443c27",
   "metadata": {
     "schemaVersion": 1,
     "id": "villagerverdict",
@@ -30,8 +30,8 @@
       }
     ],
     "depends": {
-      "fabricloader": ">=0.20.1",
-      "fabric-api": ">=0.165.2+26.3",
+      "fabricloader": ">=0.19.5",
+      "fabric-api": ">=0.163.0+26.3",
       "minecraft": "26.3",
       "java": ">=25"
     }
