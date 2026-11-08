@@ -1,0 +1,37 @@
+Review fixes regression validation
+Date: 2026-11-08
+Runtime: Zulu Java 25.0.5+8, Minecraft 26.3
+
+Command:
+JAVA_HOME=/Users/eric/.sdkman/candidates/java/25.0.5.0+8-zulu ./gradlew test runClientGameTest --console=plain
+
+JUnit results:
+cn.ericcraft.villagerverdict.AnalysisTest: tests=30, failures=0, errors=0, skipped=0
+cn.ericcraft.villagerverdict.DeltaTest: tests=5, failures=0, errors=0, skipped=0
+cn.ericcraft.villagerverdict.PerformanceTest: tests=1, failures=0, errors=0, skipped=0
+cn.ericcraft.villagerverdict.ProbeTest: tests=23, failures=0, errors=0, skipped=0
+cn.ericcraft.villagerverdict.ShortcutBindingsTest: tests=3, failures=0, errors=0, skipped=0
+cn.ericcraft.villagerverdict.StorageTest: tests=14, failures=0, errors=0, skipped=0
+cn.ericcraft.villagerverdict.WorldStorageTest: tests=4, failures=0, errors=0, skipped=0
+Total: 80 tests, 0 failures, 0 errors, 0 skipped
+
+Client integration assertions:
+[23:23:28] [Test thread/INFO] (Minecraft) [STDOUT]: VV_SHORTCUTS_PASS legacy isolation, native single entry, input, fresh controller, native sync, mouse, reset
+[23:23:36] [Render thread/INFO] (Minecraft) [STDOUT]: VV_PERFORMANCE loaded=301 scan_us=500 analysis_us=1666 markers_us=396 async_write_us=13942
+[23:23:39] [Test thread/INFO] (Minecraft) [STDOUT]: VV_CLEAR_QUARANTINE_PASS pending request, completion, manual interaction, late response, dataset switch
+[23:23:39] [Test thread/INFO] (Minecraft) [STDOUT]: VV_DATA_CLEAR_PASS cancel, world/server isolation, concurrent config, disk, memory, rescan
+[23:23:39] [Render thread/INFO] (Minecraft) [STDOUT]: VV_INTEGRATION_PASS manual capture, silent capture, safe close, GUI forms, inventory, no purchases
+[23:23:40] [Render thread/INFO] (Minecraft) [STDOUT]: VV_WORLD_ISOLATION_PASS
+[23:23:43] [Test thread/INFO] (Minecraft) [STDOUT]: VV_CLEAR_TRANSITIONS_PASS dataset, dimension, disconnect, reload, configuration, empty records
+BUILD SUCCESSFUL in 32s
+
+Coverage:
+- Clear start/completion and same-connection dataset reload preserve the late-response quarantine.
+- Injected-clock unit tests check the original quarantine deadline and cleared cooldown/failure state.
+- Mouse buttons 4 and 5: editor capture, disk save/load, conflict release, gameplay input.
+- Clear pending behind a writer barrier: edit targets/regions, switch datasets/dimensions or disconnect, then reload the original identity.
+- Cleared identities retain configuration and contain no resurrected villager records.
+
+Screenshot: screenshots/shortcuts-mouse.png
+Full execution log: build/review-fixes-client.log (generated, not committed)
+The PrismLauncher instance launch directory was not modified.

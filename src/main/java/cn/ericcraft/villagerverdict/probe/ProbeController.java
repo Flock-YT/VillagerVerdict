@@ -182,6 +182,14 @@ public final class ProbeController {
     last = State.IDLE;
   }
 
+  /** Clears local tracking without allowing an outstanding response to enter a new context. */
+  public void resetPreservingQuarantine() {
+    cancel(State.CANCELLED);
+    long until = quarantine;
+    reset();
+    quarantine = until;
+  }
+
   private void transition(State state, int id) {
     var c = context;
     context =

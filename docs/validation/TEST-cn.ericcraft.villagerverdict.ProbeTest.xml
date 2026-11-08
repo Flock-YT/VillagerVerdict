@@ -1,25 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="cn.ericcraft.villagerverdict.ProbeTest" tests="20" skipped="0" failures="0" errors="0" timestamp="2026-11-08T15:09:43.552Z" hostname="Mac-Mini.local" time="0.015">
+<testsuite name="cn.ericcraft.villagerverdict.ProbeTest" tests="23" skipped="0" failures="0" errors="0" timestamp="2026-11-08T15:23:13.810Z" hostname="Mac-Mini.local" time="0.013">
   <properties/>
   <testcase name="cancelledResponseCannotCapture()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
   <testcase name="pauseCancels()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
-  <testcase name="singleRequestOnly()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
+  <testcase name="singleRequestOnly()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
   <testcase name="closingNeedsLocalRestoration()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
-  <testcase name="ambiguousManualInteractionQuarantines()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
-  <testcase name="manualWorksWhileDisabled()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
+  <testcase name="ambiguousManualInteractionQuarantines()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
+  <testcase name="manualWorksWhileDisabled()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
   <testcase name="failuresBackOff()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
   <testcase name="normalLifecycle()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
+  <testcase name="preservingResetCancelsOutstandingMenu()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
   <testcase name="timeoutDoesNotRequireServerCloseAck()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
   <testcase name="restartingResetsTimeoutStreak()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
-  <testcase name="rejectedIsDistinctFromTimeout()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
-  <testcase name="unrelatedWindowStops()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
+  <testcase name="rejectedIsDistinctFromTimeout()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
+  <testcase name="unrelatedWindowStops()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
   <testcase name="worldResetDropsEntityIds()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
   <testcase name="offersNeedWindow()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
   <testcase name="cooldownAfterSuccess()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
   <testcase name="lateResponseCannotCapture()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
   <testcase name="mismatchedContainerStops()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
-  <testcase name="rejectionResetsTimeoutStreak()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
-  <testcase name="threeTimeoutsDisable()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
+  <testcase name="rejectionResetsTimeoutStreak()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.001"/>
+  <testcase name="threeTimeoutsDisable()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
+  <testcase name="clearResetsKeepQuarantineUntilOriginalDeadline()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
+  <testcase name="preservingResetClearsCooldownAndFailures()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
   <testcase name="disabledSendsNoRequest()" classname="cn.ericcraft.villagerverdict.ProbeTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

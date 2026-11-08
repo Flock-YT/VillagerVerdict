@@ -5,6 +5,7 @@ import cn.ericcraft.villagerverdict.model.*;
 import cn.ericcraft.villagerverdict.storage.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.*;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.fabric.api.client.gametest.v1.*;
 import net.fabricmc.fabric.api.client.gametest.v1.context.*;
@@ -275,7 +276,9 @@ public class ClientIntegrationTest implements FabricClientGameTest {
                     + " inventory, no purchases");
           });
     }
-    try (var other = c.worldBuilder().create()) {
+    var other = c.worldBuilder().create();
+    WorldData disconnected;
+    try {
       c.waitFor(mc -> VerdictService.INSTANCE.ready());
       c.runOnClient(
           mc -> {
@@ -283,7 +286,35 @@ public class ClientIntegrationTest implements FabricClientGameTest {
               throw new AssertionError("world data crossed identity");
             System.out.println("VV_WORLD_ISOLATION_PASS");
           });
+      var originalSettings = c.computeOnClient(mc -> VerdictService.INSTANCE.settings);
+      var dataset = testClearWhileLeaving(c, "dataset", () -> c.runOnClient(mc -> {
+        var service = VerdictService.INSTANCE;
+        service.settings(withDataset(service.settings, "clear-switch"));
+        service.tick();
+      }));
+      c.waitFor(mc -> VerdictService.INSTANCE.ready());
+      c.runOnClient(mc -> VerdictService.INSTANCE.settings(originalSettings));
+      c.waitFor(mc -> VerdictService.INSTANCE.ready()
+          && VerdictService.INSTANCE.identity().equals(dataset.identity()));
+      assertActiveConfiguration(c, dataset);
+
+      var dimension = testClearWhileLeaving(c, "dimension", () ->
+          other.getServer().runCommand("execute as @p in minecraft:the_nether run tp @s 0 100 0"));
+      c.waitFor(mc -> VerdictService.INSTANCE.ready());
+      other.getServer().runCommand("execute as @p in minecraft:overworld run tp @s 0 -60 0");
+      c.waitFor(mc -> VerdictService.INSTANCE.ready()
+          && VerdictService.INSTANCE.identity().equals(dimension.identity()));
+      assertActiveConfiguration(c, dimension);
+
+      disconnected = testClearWhileLeaving(c, "disconnect", other::close);
+    } finally {
+      if (c.computeOnClient(mc -> mc.level != null)) other.close();
     }
+    try (var reopened = other.getWorldSave().open()) {
+      c.waitFor(mc -> VerdictService.INSTANCE.ready());
+      assertActiveConfiguration(c, disconnected);
+    }
+    System.out.println("VV_CLEAR_TRANSITIONS_PASS dataset, dimension, disconnect, reload, configuration, empty records");
   }
 
   private void testShortcuts(ClientGameTestContext c) {
@@ -416,7 +447,57 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.clickScreenButton("vv.shortcuts");
     c.clickScreenButton("vv.restoreDefaults");
     c.runOnClient(mc -> mc.gui.setScreen(null));
-    System.out.println("VV_SHORTCUTS_PASS legacy isolation, native single entry, input, fresh controller, native sync, reset");
+    testMouseShortcuts(c, shortcutsPath);
+    System.out.println("VV_SHORTCUTS_PASS legacy isolation, native single entry, input, fresh controller, native sync, mouse, reset");
+  }
+
+  private void testMouseShortcuts(ClientGameTestContext c, Path path) {
+    c.setScreen(() -> new ShortcutScreen(new VerdictScreen()));
+    c.clickScreenButton("key.villagerverdict.scan");
+    c.getInput().pressMouse(4);
+    c.clickScreenButton("key.villagerverdict.mark");
+    c.getInput().pressMouse(5);
+    c.runOnClient(mc -> {
+      var shortcuts = VillagerverdictClient.shortcuts();
+      if (!shortcuts.get(1).mapping().matches(InputConstants.Type.MOUSE.getOrCreate(4))
+          || !shortcuts.get(2).mapping().matches(InputConstants.Type.MOUSE.getOrCreate(5)))
+        throw new AssertionError("side mouse buttons were not captured");
+    });
+    c.takeScreenshot("shortcuts-mouse");
+    var saving = c.computeOnClient(mc -> VillagerverdictClient.shortcutManager().flush());
+    c.waitFor(mc -> saving.isDone());
+    saving.join();
+    try (var store = new JsonStore(e -> { throw new AssertionError(e); })) {
+      var bindings = store.read(path, ShortcutBindings.class, ShortcutBindings::defaults).join().bindings();
+      if (!InputConstants.Type.MOUSE.getOrCreate(4).getName().equals(bindings.get("scan"))
+          || !InputConstants.Type.MOUSE.getOrCreate(5).getName().equals(bindings.get("mark")))
+        throw new AssertionError("mouse bindings were not persisted");
+    }
+    c.runOnClient(mc -> VillagerverdictClient.shortcutManager().load());
+    c.waitFor(mc -> VillagerverdictClient.shortcutManager().editable());
+    c.runOnClient(mc -> {
+      if (!VillagerverdictClient.shortcuts().get(1).mapping().matches(InputConstants.Type.MOUSE.getOrCreate(4))
+          || !VillagerverdictClient.shortcuts().get(2).mapping().matches(InputConstants.Type.MOUSE.getOrCreate(5)))
+        throw new AssertionError("mouse bindings were not restored");
+    });
+    c.clickScreenButton("key.villagerverdict.navigate");
+    c.getInput().pressMouse(4);
+    c.runOnClient(mc -> {
+      if (!VillagerverdictClient.shortcuts().get(1).mapping().isUnbound()
+          || !VillagerverdictClient.shortcuts().get(3).mapping().matches(InputConstants.Type.MOUSE.getOrCreate(4)))
+        throw new AssertionError("duplicate mouse binding was not released");
+      mc.gui.setScreen(null);
+    });
+    boolean markers = c.computeOnClient(mc -> VerdictService.INSTANCE.settings.markers());
+    c.getInput().pressMouse(5);
+    c.runOnClient(mc -> {
+      if (VerdictService.INSTANCE.settings.markers() == markers)
+        throw new AssertionError("mouse binding did not receive gameplay input");
+    });
+    c.getInput().pressMouse(5);
+    c.setScreen(() -> new ShortcutScreen(new VerdictScreen()));
+    c.clickScreenButton("vv.restoreDefaults");
+    c.runOnClient(mc -> mc.gui.setScreen(null));
   }
 
   private void testNativeBindings(ClientGameTestContext c, String language) {
@@ -527,7 +608,151 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         throw new AssertionError("clear lost configuration edited while it was in progress");
     }
     c.runOnClient(mc -> mc.gui.setScreen(null));
+    testClearQuarantine(c);
     System.out.println("VV_DATA_CLEAR_PASS cancel, world/server isolation, concurrent config, disk, memory, rescan");
+  }
+
+  private void testClearQuarantine(ClientGameTestContext c) {
+    var villagers = c.computeOnClient(mc -> {
+      var result = new ArrayList<Villager>();
+      for (var entity : mc.level.entitiesForRendering())
+        if (entity instanceof Villager v) result.add(v);
+      return result;
+    });
+    var clearing = c.computeOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.probe.configure(service.settings.intervalMillis(), 60000);
+      service.manual(villagers.get(0));
+      if (service.probe.context() == null) throw new AssertionError("test request not established");
+      var future = service.clearWorldVillagers(service.identity());
+      service.manual(villagers.get(1));
+      if (service.probe.context() != null) throw new AssertionError("interaction entered pending clear");
+      return future;
+    });
+    c.waitFor(mc -> clearing.isDone());
+    clearing.join();
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.manual(villagers.get(1));
+      if (service.probe.context() != null) throw new AssertionError("clear erased response quarantine");
+      service.open(77, true);
+      if (service.probe.offers(77) || !service.records().isEmpty())
+        throw new AssertionError("late response accepted after clear");
+    });
+    var originalSettings = c.computeOnClient(mc -> VerdictService.INSTANCE.settings);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.settings(withDataset(originalSettings, "quarantine-switch"));
+      service.tick();
+    });
+    c.waitFor(mc -> VerdictService.INSTANCE.ready());
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.manual(villagers.get(1));
+      if (service.probe.context() != null) throw new AssertionError("dataset switch erased response quarantine");
+      service.probe.reset();
+      service.settings(originalSettings);
+    });
+    c.waitFor(mc -> VerdictService.INSTANCE.ready()
+        && VerdictService.INSTANCE.identity().dataset().equals(originalSettings.dataset()));
+    System.out.println("VV_CLEAR_QUARANTINE_PASS pending request, completion, manual interaction, late response, dataset switch");
+  }
+
+  private WorldData testClearWhileLeaving(ClientGameTestContext c, String transition, Runnable leave) {
+    var expected = c.computeOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      // Seed an unloaded record so any stale write after the clear is observable.
+      service.edit(new VillagerRecord(service.identity(), UUID.randomUUID(), "minecraft:librarian",
+          5, false, 0, -60, 0, System.currentTimeMillis(), null,
+          VillagerRecord.Manual.AUTO, "", Set.of()));
+      var target = new TargetTrade("clear-" + transition, "minecraft:book", "", 1, 0, 1);
+      var region = new TradingHallRegion("clear-" + transition, transition, service.identity().dimension(),
+          0, 0, 0, 10, 10, 10, List.of(target), 0xFF55DD88);
+      var targets = new ArrayList<>(service.targets);
+      var regions = new ArrayList<>(service.regions);
+      targets.add(target);
+      regions.add(region);
+      return new WorldData(2, service.identity(), List.of(), targets, regions);
+    });
+    CompletableFuture<Integer> clearing;
+    try (var barrier = holdWorldStore(c)) {
+      clearing = c.computeOnClient(mc -> {
+        var service = VerdictService.INSTANCE;
+        var future = transition.equals("dataset") ? service.clearWorldVillagers(service.identity())
+            : service.clearServerVillagers(service.identity().server());
+        service.targets = new ArrayList<>(expected.targets());
+        service.regions = new ArrayList<>(expected.regions());
+        service.changed();
+        return future;
+      });
+      leave.run();
+      c.waitFor(mc -> !expected.identity().equals(VerdictService.INSTANCE.identity()));
+      if (clearing.isDone()) throw new AssertionError("clear completed before leaving " + transition);
+    }
+    c.waitFor(mc -> clearing.isDone());
+    clearing.join();
+    // Listing on the service writer drains configuration snapshots queued during the clear.
+    var catalog = c.computeOnClient(mc -> VerdictService.INSTANCE.storedWorlds());
+    c.waitFor(mc -> catalog.isDone());
+    catalog.join();
+    Path path = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir()
+        .resolve("villagerverdict/worlds/" + JsonStore.fileKey(expected.identity()) + ".json");
+    try (var store = new JsonStore(e -> { throw new AssertionError(e); })) {
+      if (!expected.equals(store.read(path, WorldData.class, () -> null).join()))
+        throw new AssertionError("configuration lost or records resurrected during " + transition);
+    }
+    return expected;
+  }
+
+  private void assertActiveConfiguration(ClientGameTestContext c, WorldData expected) {
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (!expected.identity().equals(service.identity()) || !expected.targets().equals(service.targets)
+          || !expected.regions().equals(service.regions) || !service.records().isEmpty())
+        throw new AssertionError("cleared world did not reload its edited configuration");
+    });
+  }
+
+  private Settings withDataset(Settings s, String dataset) {
+    return new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(), s.outlines(),
+        s.throughWalls(), s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), s.autoScan(),
+        s.markerLimit(), s.textRange(), s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(),
+        s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), dataset);
+  }
+
+  /** Test-only barrier makes the transition happen while disk clearing is still queued. */
+  private StoreBarrier holdWorldStore(ClientGameTestContext c) {
+    var release = new CountDownLatch(1);
+    var entered = new CompletableFuture<Void>();
+    c.runOnClient(mc -> {
+      ExecutorService worker;
+      try {
+        var storeField = VerdictService.class.getDeclaredField("store");
+        storeField.setAccessible(true);
+        var workerField = JsonStore.class.getDeclaredField("worker");
+        workerField.setAccessible(true);
+        worker = (ExecutorService) workerField.get(storeField.get(VerdictService.INSTANCE));
+      } catch (ReflectiveOperationException e) {
+        throw new AssertionError(e);
+      }
+      worker.submit(() -> {
+        entered.complete(null);
+        try {
+          if (!release.await(30, TimeUnit.SECONDS)) throw new AssertionError("store barrier timed out");
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new AssertionError(e);
+        }
+      });
+    });
+    c.waitFor(mc -> entered.isDone());
+    return new StoreBarrier(release);
+  }
+
+  private record StoreBarrier(CountDownLatch release) implements AutoCloseable {
+    public void close() {
+      release.countDown();
+    }
   }
 
   private void waitDataScreen(ClientGameTestContext c) {

@@ -216,7 +216,9 @@ public final class VerdictService {
     save();
     generation++;
     cancel(State.CANCELLED);
-    probe.reset();
+    // Dataset/dimension changes and failed-clear reloads can share the outstanding connection.
+    if (mc.getConnection() == null) probe.reset();
+    else probe.resetPreservingQuarantine();
     loaded.clear();
     records.clear();
     persistedData = null;
@@ -312,7 +314,7 @@ public final class VerdictService {
     clearingWorlds = matches;
     if (clearingCurrentWorld()) {
       cancel(State.CANCELLED);
-      probe.reset();
+      probe.resetPreservingQuarantine();
       analysisRevision++;
     }
     var finished = new CompletableFuture<Integer>();
@@ -342,7 +344,7 @@ public final class VerdictService {
 
   private void resetActiveAfterClear() {
     cancel(State.CANCELLED);
-    probe.reset();
+    probe.resetPreservingQuarantine();
     analysisRevision++;
     records.clear();
     notifications.clear();
@@ -424,12 +426,14 @@ public final class VerdictService {
   }
 
   public void save() {
-    if (!ready || identity == null || clearingCurrentWorld()) return;
+    if (!ready || identity == null) return;
+    // Keep configuration edits under their original identity, including when leaving mid-clear.
+    // Empty records are safe whether this queued snapshot is written before or after the clear.
     var current =
         new WorldData(
             2,
             identity,
-            List.copyOf(records.values()),
+            clearingCurrentWorld() ? List.of() : List.copyOf(records.values()),
             List.copyOf(targets),
             List.copyOf(regions));
     if (current.equals(persistedData)) return;

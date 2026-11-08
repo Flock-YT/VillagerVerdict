@@ -190,6 +190,56 @@ class ProbeTest {
   }
 
   @Test
+  void clearResetsKeepQuarantineUntilOriginalDeadline() {
+    begin();
+    p.cancel(State.CANCELLED);
+    p.resetPreservingQuarantine();
+    assertNull(p.context());
+    assertFalse(p.running());
+    assertFalse(p.begin(1, "overworld", b, 6, Mode.MANUAL));
+    assertFalse(p.open(3, true));
+    assertFalse(p.offers(3));
+
+    time.addAndGet(1000);
+    p.resetPreservingQuarantine();
+    p.run();
+    time.addAndGet(3999);
+    assertFalse(p.eligible(b));
+    assertFalse(p.begin(1, "overworld", b, 6, Mode.AUTOMATIC));
+    assertFalse(p.begin(1, "overworld", b, 6, Mode.MANUAL));
+    time.incrementAndGet();
+    assertTrue(p.begin(1, "overworld", b, 6, Mode.MANUAL));
+    assertTrue(p.open(4, true));
+    assertTrue(p.offers(4));
+  }
+
+  @Test
+  void preservingResetCancelsOutstandingMenu() {
+    begin();
+    assertTrue(p.open(3, true));
+    p.resetPreservingQuarantine();
+    assertNull(p.context());
+    assertFalse(p.running());
+    assertFalse(p.offers(3));
+    assertFalse(p.begin(1, "overworld", b, 6, Mode.MANUAL));
+    time.addAndGet(5000);
+    assertTrue(p.begin(1, "overworld", b, 6, Mode.MANUAL));
+  }
+
+  @Test
+  void preservingResetClearsCooldownAndFailures() {
+    begin();
+    p.rejected();
+    assertEquals(1, p.failureCount(a));
+    p.resetPreservingQuarantine();
+    assertEquals(0, p.failureCount(a));
+    assertEquals(0, p.retryAt(a));
+    time.addAndGet(5000);
+    p.run();
+    assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
+  }
+
+  @Test
   void ambiguousManualInteractionQuarantines() {
     begin();
     assertFalse(p.begin(1, "overworld", b, 6, Mode.MANUAL));

@@ -6,6 +6,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /** In-mod editor for the Villager Verdict key mappings. */
@@ -72,17 +73,22 @@ public final class ShortcutScreen extends Screen {
             }
             return super.keyPressed(event);
         }
-        if (!manager.editable()) {
-            capturing = -1;
-            return true;
-        }
-        var shortcut = shortcuts.get(capturing);
         InputConstants.Key key = event.key() == InputConstants.KEY_ESCAPE
             ? InputConstants.UNKNOWN : InputConstants.Type.KEYBOARD.getOrCreate(event.key());
-        manager.bind(shortcut, key);
+        bindCapturedKey(key);
+        return true;
+    }
+
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (capturing < 0) return super.mouseClicked(event, doubleClick);
+        bindCapturedKey(InputConstants.Type.MOUSE.getOrCreate(event.button()));
+        return true;
+    }
+
+    private void bindCapturedKey(InputConstants.Key key) {
+        if (manager.editable()) manager.bind(shortcuts.get(capturing), key);
         capturing = -1;
         rebuildWidgets();
-        return true;
     }
 
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
