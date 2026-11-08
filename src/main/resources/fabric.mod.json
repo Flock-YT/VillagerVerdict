@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "villagerverdict",
+  "version": "${version}",
+  "name": "VillagerVerdict",
+  "description": "Client-side villager trade capture, comparison and trading hall management.",
+  "authors": [
+    "Eric"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/villagerverdict/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "cn.ericcraft.villagerverdict.client.VillagerverdictClient"
+    ],
+    "main": [
+      "cn.ericcraft.villagerverdict.Villagerverdict"
+    ]
+  },
+  "mixins": [
+    {
+      "config": "villagerverdict.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": ">=0.165.2+26.3",
+    "minecraft": "${minecraft_version}",
+    "java": ">=25"
+  }
+}

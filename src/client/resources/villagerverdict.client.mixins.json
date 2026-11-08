@@ -1,0 +1,17 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "cn.ericcraft.villagerverdict.mixin.client",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "ClientPacketListenerMixin",
+    "GuiMixin",
+    "EntityRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}

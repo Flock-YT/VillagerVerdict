@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="cn.ericcraft.villagerverdict.StorageTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-08T12:39:35.859Z" hostname="Mac-Mini.local" time="0.074">
+  <properties/>
+  <testcase name="identitiesIsolateServerDimensionAndDataset()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.004"/>
+  <testcase name="futureVersionProtected()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.012"/>
+  <testcase name="atomicWritesLeaveNoTemporaryFiles()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.013"/>
+  <testcase name="malformedFileNeverOverwritten()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.003"/>
+  <testcase name="nullFileProtected()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.001"/>
+  <testcase name="missingFileUsesDefault()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.001"/>
+  <testcase name="legacyEnvelopeUpgradesOnNextWrite()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.011"/>
+  <testcase name="configurationVersionOneMigrates()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.005"/>
+  <testcase name="writesForTwoWorldsDoNotMix()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.009"/>
+  <testcase name="restartRestoresLatestSnapshot()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.011"/>
+  <testcase name="rejectDuplicateUUIDAndWrongWorld()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,56 @@
+{
+  "artifact": "/Users/eric/Documents/IdeaProjects/VillagerVerdict/build/libs/VillagerVerdict-1.0.0.jar",
+  "bytes": 129541,
+  "sha256": "7e9b5f3d174a23fd61a362a2626c21789e2c9e9868a3393df97de3a58c8610bb",
+  "metadata": {
+    "schemaVersion": 1,
+    "id": "villagerverdict",
+    "version": "1.0.0",
+    "name": "VillagerVerdict",
+    "description": "Client-side villager trade capture, comparison and trading hall management.",
+    "authors": [
+      "Eric"
+    ],
+    "contact": {},
+    "license": "MIT",
+    "icon": "assets/villagerverdict/icon.png",
+    "environment": "client",
+    "entrypoints": {
+      "client": [
+        "cn.ericcraft.villagerverdict.client.VillagerverdictClient"
+      ],
+      "main": [
+        "cn.ericcraft.villagerverdict.Villagerverdict"
+      ]
+    },
+    "mixins": [
+      {
+        "config": "villagerverdict.client.mixins.json",
+        "environment": "client"
+      }
+    ],
+    "depends": {
+      "fabricloader": ">=0.20.1",
+      "fabric-api": ">=0.165.2+26.3",
+      "minecraft": "26.3",
+      "java": ">=25"
+    }
+  },
+  "required_files_present": [
+    "cn/ericcraft/villagerverdict/client/VillagerverdictClient.class",
+    "cn/ericcraft/villagerverdict/mixin/client/ClientPacketListenerMixin.class",
+    "cn/ericcraft/villagerverdict/mixin/client/GuiMixin.class",
+    "cn/ericcraft/villagerverdict/mixin/client/EntityRendererMixin.class",
+    "assets/villagerverdict/lang/zh_cn.json",
+    "assets/villagerverdict/lang/en_us.json",
+    "assets/villagerverdict/icon.png",
+    "villagerverdict.client.mixins.json",
+    "LICENSE.txt_VillagerVerdict"
+  ],
+  "client_mixins": [
+    "ClientPacketListenerMixin",
+    "GuiMixin",
+    "EntityRendererMixin"
+  ],
+  "no_test_mod_or_junit": true
+}
