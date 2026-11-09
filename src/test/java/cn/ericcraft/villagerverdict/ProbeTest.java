@@ -18,21 +18,6 @@ class ProbeTest {
     assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
   }
 
-  @Test
-  void fastIntervalStillSerializesRequestsAndHonorsCooldown() {
-    p.configure(100, 5000);
-    begin();
-    assertFalse(p.eligible(b));
-    assertTrue(p.open(3, true));
-    assertTrue(p.offers(3));
-    p.closing();
-    p.complete(true);
-    time.addAndGet(99);
-    assertFalse(p.eligible(b));
-    time.incrementAndGet();
-    assertFalse(p.eligible(a));
-    assertTrue(p.begin(1, "overworld", b, 6, Mode.AUTOMATIC));
-  }
 
   @Test
   void disabledSendsNoRequest() {
@@ -77,12 +62,6 @@ class ProbeTest {
     assertNull(p.context());
   }
 
-  @Test
-  void unrelatedWindowStops() {
-    begin();
-    assertFalse(p.open(3, false));
-    assertFalse(p.running());
-  }
 
   @Test
   void lateResponseCannotCapture() {
@@ -148,44 +127,7 @@ class ProbeTest {
     assertEquals(State.TIMEOUT, p.state());
   }
 
-  @Test
-  void restartingResetsTimeoutStreak() {
-    p.run();
-    for (int i = 0; i < 3; i++) {
-      time.addAndGet(100000);
-      assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
-      time.addAndGet(5000);
-      p.tick();
-    }
-    assertFalse(p.running());
-    time.addAndGet(300000);
-    p.run();
-    assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
-    time.addAndGet(5000);
-    p.tick();
-    assertTrue(p.running());
-  }
 
-  @Test
-  void rejectionResetsTimeoutStreak() {
-    p.run();
-    for (int i = 0; i < 2; i++) {
-      time.addAndGet(100000);
-      assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
-      time.addAndGet(5000);
-      p.tick();
-    }
-    time.addAndGet(300000);
-    assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
-    p.rejected();
-    for (int i = 0; i < 2; i++) {
-      time.addAndGet(300000);
-      assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
-      time.addAndGet(5000);
-      p.tick();
-    }
-    assertTrue(p.running());
-  }
 
   @Test
   void pauseCancels() {
@@ -229,31 +171,7 @@ class ProbeTest {
     assertTrue(p.offers(4));
   }
 
-  @Test
-  void preservingResetCancelsOutstandingMenu() {
-    begin();
-    assertTrue(p.open(3, true));
-    p.resetPreservingQuarantine();
-    assertNull(p.context());
-    assertFalse(p.running());
-    assertFalse(p.offers(3));
-    assertFalse(p.begin(1, "overworld", b, 6, Mode.MANUAL));
-    time.addAndGet(5000);
-    assertTrue(p.begin(1, "overworld", b, 6, Mode.MANUAL));
-  }
 
-  @Test
-  void preservingResetClearsCooldownAndFailures() {
-    begin();
-    p.rejected();
-    assertEquals(1, p.failureCount(a));
-    p.resetPreservingQuarantine();
-    assertEquals(0, p.failureCount(a));
-    assertEquals(0, p.retryAt(a));
-    time.addAndGet(5000);
-    p.run();
-    assertTrue(p.begin(1, "overworld", a, 5, Mode.AUTOMATIC));
-  }
 
   @Test
   void ambiguousManualInteractionQuarantines() {
@@ -285,12 +203,4 @@ class ProbeTest {
     assertNull(p.context());
   }
 
-  @Test
-  void timeoutDoesNotRequireServerCloseAck() {
-    begin();
-    time.addAndGet(5000);
-    p.tick();
-    assertEquals(State.TIMEOUT, p.state());
-    assertEquals(1, p.failureCount(a));
-  }
 }

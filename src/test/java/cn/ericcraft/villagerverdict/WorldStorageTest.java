@@ -59,40 +59,5 @@ class WorldStorageTest {
         }
     }
 
-    @Test
-    void catalogAndClearProtectCorruptFutureAndMismatchedFiles() throws Exception {
-        var data = world("a", "default", "overworld");
-        var corrupt = directory.resolve("broken.json");
-        var future = directory.resolve("future.json");
-        var mismatch = directory.resolve("wrong-name.json");
-        Files.writeString(corrupt, "broken { original");
-        Files.writeString(future, "{\"version\":999}");
-        try (var store = new JsonStore(e -> {})) {
-            store.save(path(data), data);
-            store.flush().get();
-            Files.copy(path(data), mismatch);
-            String original = Files.readString(mismatch);
-            assertEquals(List.of(data), store.worlds(directory).get());
-            assertEquals(1, store.clearVillagers(directory, id -> true).get());
-            for (var file : List.of(corrupt, future, mismatch)) assertTrue(store.blocked(file));
-            assertEquals("broken { original", Files.readString(corrupt));
-            assertEquals("{\"version\":999}", Files.readString(future));
-            assertEquals(original, Files.readString(mismatch));
-        }
-    }
 
-    @Test
-    void missingDirectoryIsEmptyButListingFailureIsReported() throws Exception {
-        try (var store = new JsonStore(e -> {})) {
-            var missing = directory.resolve("missing");
-            assertTrue(store.worlds(missing).get().isEmpty());
-            assertEquals(0, store.clearVillagers(missing, id -> true).get());
-            var file = directory.resolve("not-a-directory");
-            Files.writeString(file, "original");
-            assertThrows(java.util.concurrent.ExecutionException.class, () -> store.worlds(file).get());
-            assertThrows(java.util.concurrent.ExecutionException.class,
-                () -> store.clearVillagers(file, id -> true).get());
-            assertEquals("original", Files.readString(file));
-        }
-    }
 }

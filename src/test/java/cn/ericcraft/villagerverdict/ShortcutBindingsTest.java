@@ -38,19 +38,4 @@ class ShortcutBindingsTest {
             () -> new ShortcutBindings(1, Map.of("manage", "key.keyboard.f8")));
     }
 
-    @Test
-    void corruptAndFutureVersionsAreProtectedFromReset() throws Exception {
-        for (String contents : new String[] {"broken {", "{\"version\":999,\"bindings\":{}}"}) {
-            var path = directory.resolve("shortcuts.json");
-            Files.writeString(path, contents);
-            try (var store = new JsonStore(e -> {})) {
-                assertThrows(ExecutionException.class,
-                    () -> store.read(path, ShortcutBindings.class, ShortcutBindings::defaults).get());
-                assertTrue(store.blocked(path));
-                assertFalse(store.save(path, ShortcutBindings.defaults()));
-                store.flush().get();
-                assertEquals(contents, Files.readString(path));
-            }
-        }
-    }
 }

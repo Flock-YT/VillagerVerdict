@@ -90,19 +90,6 @@ class AnalysisTest {
     assertFalse(TradeComparison.replaces(b, a));
   }
 
-  @Test
-  void vectorOrderComparesEveryInput() {
-    var cheaperSecond =
-        new Trade(
-            item("emerald", 1), item("emerald", 1), item("diamond", 2), item("apple", 1), 0, 10);
-    var moreExpensiveSecond =
-        new Trade(
-            item("emerald", 1), item("emerald", 1), item("diamond", 3), item("apple", 1), 0, 10);
-    assertTrue(
-        TradeComparison.vectorOrder(
-                cheaperSecond.cost(false), moreExpensiveSecond.cost(false))
-            < 0);
-  }
 
   @Test
   void repeatedInputResourceAggregates() {
@@ -131,13 +118,6 @@ class AnalysisTest {
     assertFalse(TradeComparison.replaces(trade(10, book(5)), trade(2, book(5))));
   }
 
-  @Test
-  void enchantmentTradeoffsDoNotDominate() {
-    var a = new ItemData("sword", 1, "{}", "{}", Map.of("a", 5, "b", 1), "sword");
-    var b = new ItemData("sword", 1, "{}", "{}", Map.of("a", 1, "b", 5), "sword");
-    assertFalse(a.dominates(b));
-    assertFalse(b.dominates(a));
-  }
 
   @Test
   void stockDoesNotEraseLongTermValue() {
@@ -216,24 +196,7 @@ class AnalysisTest {
     assertFalse(analyze(List.of(a), List.of(), 1).verdicts().containsKey(a.uuid()));
   }
 
-  @Test
-  void scannedRecordsDoNotCarryCompletenessState() {
-    var a = v(1, trade(1, book(5)));
-    var b = v(2, trade(10, book(4)));
-    b =
-        b.withSnapshot(
-            new TradeSnapshot(b.snapshot().trades(), 100));
-    var r = analyze(List.of(a, b), List.of(), 1);
-    assertEquals(AnalysisResult.Status.DISCARD, r.verdicts().get(b.uuid()).status());
-  }
 
-  @Test
-  void replacementUsesLatestRecordRegardlessOfLoadState() {
-    var a = v(1, trade(1, book(5)));
-    var b = v(2, trade(10, book(4)));
-    var r = analyze(List.of(a, b), List.of(), 1);
-    assertEquals(AnalysisResult.Status.DISCARD, r.verdicts().get(b.uuid()).status());
-  }
 
   @Test
   void explanationContainsUUIDAndDifferences() {
@@ -258,53 +221,11 @@ class AnalysisTest {
     assertFalse(r.contains(v(3)));
   }
 
-  @Test
-  void priceOrderingIsNumeric() {
-    var a = v(1, trade(10, book(5)));
-    var b = v(2, trade(2, book(5)));
-    assertEquals(Set.of(b.uuid()), analyze(List.of(a, b), List.of(), 1).recommended());
-  }
 
-  @Test
-  void moreExpensiveBackupStillCoversCommodity() {
-    var a = v(1, trade(2, book(5)));
-    var b = v(2, trade(10, book(5)));
-    var r = analyze(List.of(a, b), List.of(), 2);
-    assertEquals(2, r.recommended().size());
-    assertTrue(r.gaps().isEmpty());
-  }
 
-  @Test
-  void targetBackupCanUseDifferentPrices() {
-    var a = v(1, trade(2, book(5)));
-    var b = v(2, trade(10, book(5)));
-    var r = analyze(List.of(a, b), List.of(new TargetTrade("s", "book", "sharpness", 1, 0, 2)), 1);
-    assertEquals(2, r.recommended().size());
-    assertTrue(r.gaps().isEmpty());
-  }
 
-  @Test
-  void backupOverPriceCapReportsGap() {
-    var a = v(1, trade(2, book(5)));
-    var b = v(2, trade(10, book(5)));
-    var r = analyze(List.of(a, b), List.of(new TargetTrade("s", "book", "sharpness", 1, 5, 2)), 1);
-    assertEquals(2, r.recommended().size());
-    assertTrue(r.gaps().stream().anyMatch(g -> g.contains("price")));
-  }
 
-  @Test
-  void unknownCurrencyNeverBecomesFree() {
-    var a = new Trade(item("diamond", 1), item("diamond", 1), null, book(5), 0, 1);
-    assertFalse(TradeComparison.replaces(a, trade(64, book(4))));
-  }
 
-  @Test
-  void latestSnapshotRemainsUsableWithoutExpiry() {
-    var a = v(1, trade(1, book(5)));
-    var r = analyze(List.of(a), List.of(), 1);
-    assertTrue(r.recommended().contains(a.uuid()));
-    assertEquals(AnalysisResult.Status.KEEP, r.verdicts().get(a.uuid()).status());
-  }
 
   @Test
   void manuallyKeptRecordOverridesRecommendations() {

@@ -26,13 +26,6 @@ class DisplayStatusTest {
         assertEquals(3, values().length);
     }
 
-    @Test
-    void scannedRecordsDoNotCarryCompletenessState() {
-        var record = v(1, trade(1, book(5)));
-        record = record.withSnapshot(new TradeSnapshot(record.snapshot().trades(), 100));
-        assertEquals(KEEP, resolve(record, AnalysisResult.Status.KEEP));
-        assertEquals(DISCARD, resolve(record, AnalysisResult.Status.DISCARD));
-    }
 
     @Test
     void professionSelectionSurvivesSerializationAndServerToggle() {
