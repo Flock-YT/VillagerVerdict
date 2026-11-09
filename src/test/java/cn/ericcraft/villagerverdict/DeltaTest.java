@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 class DeltaTest {
   TradeSnapshot snap(Trade... t) {
-    return new TradeSnapshot(List.of(t), 5, 100, TradeSnapshot.Completeness.CURRENT);
+    return new TradeSnapshot(List.of(t), 100);
   }
 
   @Test

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="cn.ericcraft.villagerverdict.DeltaTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-08T18:07:07.459Z" hostname="Mac-Mini.local" time="0.002">
+<testsuite name="cn.ericcraft.villagerverdict.DeltaTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-09T07:19:06.132Z" hostname="Mac-Mini.local" time="0.002">
   <properties/>
-  <testcase name="sameSnapshotHasNoChanges()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.0"/>
+  <testcase name="sameSnapshotHasNoChanges()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.001"/>
   <testcase name="distinguishRestock()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.0"/>
   <testcase name="distinguishPriceChanges()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.0"/>
   <testcase name="localeDoesNotChangeTradeIdentityOrFingerprint()" classname="cn.ericcraft.villagerverdict.DeltaTest" time="0.001"/>

@@ -170,7 +170,7 @@ public final class DataScreen extends WorldScreen {
             String detail = Component.translatable("vv.worldDataDetails",
                 item.identity().dataset(),
                 ClientDisplayText.dimensionDisplayName(item.identity().dimension()),
-                item.villagers()).getString();
+                item.cachedTrades()).getString();
             graphics.text(font, font.plainSubstrByWidth(detail, innerW), innerX,
                 78 + (i - offset) * 36, 0xFF9FB8D8);
         }

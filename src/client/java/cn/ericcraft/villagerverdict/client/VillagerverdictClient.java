@@ -94,14 +94,7 @@ public final class VillagerverdictClient implements ClientModInitializer {
                 8,
                 8,
                 0xFFFFFFFF);
-            if (!s.isLoaded(r.uuid()))
-              g.text(
-                  net.minecraft.client.Minecraft.getInstance().font,
-                  net.minecraft.network.chat.Component.translatable(
-                      "vv.lastSeen", ClientDisplayText.relativeTimeText(r.lastSeen())),
-                  8,
-                  20,
-                  0xFFFFCC55);
+
           }
         });
   }

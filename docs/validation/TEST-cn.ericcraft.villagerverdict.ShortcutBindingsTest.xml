@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="cn.ericcraft.villagerverdict.ShortcutBindingsTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-08T18:07:07.721Z" hostname="Mac-Mini.local" time="0.019">
+<testsuite name="cn.ericcraft.villagerverdict.ShortcutBindingsTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-09T07:19:06.428Z" hostname="Mac-Mini.local" time="0.02">
   <properties/>
   <testcase name="corruptAndFutureVersionsAreProtectedFromReset()" classname="cn.ericcraft.villagerverdict.ShortcutBindingsTest" time="0.007"/>
-  <testcase name="restartRestoresInternalKeysIndependentlyOfManagementKey()" classname="cn.ericcraft.villagerverdict.ShortcutBindingsTest" time="0.009"/>
+  <testcase name="restartRestoresInternalKeysIndependentlyOfManagementKey()" classname="cn.ericcraft.villagerverdict.ShortcutBindingsTest" time="0.011"/>
   <testcase name="missingFileStartsUnboundWithoutImportingGameOptions()" classname="cn.ericcraft.villagerverdict.ShortcutBindingsTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

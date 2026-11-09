@@ -11,8 +11,7 @@ public record ComparisonResult(
     Trade alternative,
     Map<String, Double> baseDifference,
     Map<String, Double> actualDifference,
-    boolean higherLevel,
-    boolean confirmed) {
+    boolean higherLevel) {
   public ComparisonResult {
     baseDifference = Map.copyOf(baseDifference);
     actualDifference = Map.copyOf(actualDifference);

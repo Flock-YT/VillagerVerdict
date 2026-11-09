@@ -6,26 +6,24 @@ import java.util.*;
 public record WorldData(
     int version,
     WorldIdentity identity,
-    List<VillagerRecord> villagers,
+    List<CachedTrade> cachedTrades,
     List<TargetTrade> targets,
     List<TradingHallRegion> regions) {
   public WorldData {
-    if (version < 1 || version > 2) throw new IllegalArgumentException("unsupported version");
+    if (version != 4) throw new IllegalArgumentException("unsupported version");
     Objects.requireNonNull(identity);
-    villagers = List.copyOf(villagers);
+    cachedTrades = List.copyOf(cachedTrades);
     targets = List.copyOf(targets);
     regions = List.copyOf(regions);
-    if (villagers.stream().anyMatch(v -> !v.world().equals(identity)))
-      throw new IllegalArgumentException("world mismatch");
-    if (villagers.stream().map(VillagerRecord::uuid).distinct().count() != villagers.size())
+    if (cachedTrades.stream().map(CachedTrade::uuid).distinct().count() != cachedTrades.size())
       throw new IllegalArgumentException("duplicate UUID");
   }
 
   public static WorldData empty(WorldIdentity id) {
-    return new WorldData(2, id, List.of(), List.of(), List.of());
+    return new WorldData(4, id, List.of(), List.of(), List.of());
   }
 
-  /** Returns this world's configuration with all villager records removed. */
+  /** Returns this world's configuration with all cached trades removed. */
   public WorldData clearVillagers() {
     return new WorldData(version, identity, List.of(), targets, regions);
   }

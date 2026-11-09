@@ -50,15 +50,6 @@ public final class UiFormatting {
         return Math.max(1, (int) Math.round(seconds * 20.0));
     }
 
-    public static long millisToMinutes(long millis) {
-        return Math.max(1L, Math.round(millis / 60_000.0));
-    }
-
-    public static long minutesToMillis(long minutes) {
-        if (minutes < 1) throw new IllegalArgumentException("minutes must be at least 1");
-        return Math.max(1000L, minutes * 60_000L);
-    }
-
     public static double millisToSeconds(long millis) {
         return Math.max(0L, millis) / 1000.0;
     }
@@ -101,8 +92,7 @@ public final class UiFormatting {
 
     public static VillagerRecord.Manual normalizeManualForUi(VillagerRecord.Manual manual) {
         if (manual == null || manual == VillagerRecord.Manual.AUTO) return VillagerRecord.Manual.AUTO;
-        if (manual == VillagerRecord.Manual.REMOVE) return VillagerRecord.Manual.REMOVE;
-        return VillagerRecord.Manual.PROTECT;
+        return VillagerRecord.Manual.KEEP;
     }
 
     public static ParsedGap parseGap(String raw) {

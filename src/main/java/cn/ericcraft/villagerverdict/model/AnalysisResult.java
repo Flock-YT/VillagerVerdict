@@ -6,19 +6,11 @@ public record AnalysisResult(
     Set<UUID> recommended, Map<UUID, Verdict> verdicts, List<String> gaps) {
   public enum Status {
     KEEP,
-    REVIEW,
-    REDUNDANT
-  }
-
-  public enum Confidence {
-    HIGH,
-    MEDIUM,
-    LOW
+    DISCARD
   }
 
   public record Verdict(
       Status status,
-      Confidence confidence,
       String reason,
       List<ComparisonResult> replacements,
       int uniqueTrades,

@@ -15,7 +15,6 @@ public record Settings(
     boolean autoScan,
     int markerLimit,
     int textRange,
-    long cacheMillis,
     long intervalMillis,
     long timeoutMillis,
     int backups,
@@ -27,23 +26,14 @@ public record Settings(
   public Settings {
     autoServers = Map.copyOf(autoServers);
     acknowledged = Set.copyOf(acknowledged);
-    excludedProfessions = excludedProfessions == null ? Set.of() : Set.copyOf(excludedProfessions);
-    if (version == 1) {
-      statusMarks = true;
-      version = 2;
-    }
-    if (version == 2) {
-      autoScan = true;
-      version = 3;
-    }
-    if (version != 3
+    excludedProfessions = Set.copyOf(excludedProfessions);
+    if (version != 4
         || radius < 1
         || radius > 1024
         || scanTicks < 1
         || markerLimit < 1
         || markerLimit > 2048
         || textRange < 1
-        || cacheMillis < 1000
         || intervalMillis < 100
         || timeoutMillis < 1000
         || backups < 1) throw new IllegalArgumentException("settings");
@@ -51,7 +41,7 @@ public record Settings(
 
   public static Settings defaults() {
     return new Settings(
-        3,
+        4,
         true,
         true,
         true,
@@ -63,7 +53,6 @@ public record Settings(
         true,
         128,
         32,
-        1800000,
         100,
         5000,
         1,
@@ -80,13 +69,14 @@ public record Settings(
 
   public Settings withExcludedProfessions(Set<String> excluded) {
     return new Settings(version, markers, statusMarks, summaries, green, yellow, red, radius,
-        scanTicks, autoScan, markerLimit, textRange, cacheMillis, intervalMillis, timeoutMillis,
+        scanTicks, autoScan, markerLimit, textRange, intervalMillis, timeoutMillis,
         backups, notifications, autoServers, acknowledged, dataset, excluded);
   }
 
   public Settings auto(String server, boolean enabled, boolean ack) {
     var m = new HashMap<>(autoServers);
-    m.put(server, enabled);
+    if (enabled) m.put(server, true);
+    else m.remove(server);
     var a = new HashSet<>(acknowledged);
     if (ack) a.add(server);
     return new Settings(
@@ -102,7 +92,6 @@ public record Settings(
         autoScan,
         markerLimit,
         textRange,
-        cacheMillis,
         intervalMillis,
         timeoutMillis,
         backups,

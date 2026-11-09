@@ -26,7 +26,6 @@ public final class SettingsScreen extends WorldScreen {
         "vv.settings.tab.tools"
     };
     private static final int[] SCAN_SECOND_PRESETS = {10, 20, 40, 100}; // 0.5s, 1s, 2s, 5s
-    private static final long[] CACHE_MINUTE_PRESETS = {10L, 30L, 60L, 360L};
 
     private final Screen parent;
     private final VerdictService service = VerdictService.INSTANCE;
@@ -42,7 +41,8 @@ public final class SettingsScreen extends WorldScreen {
     private int radius;
     private int scanTicks;
     private boolean autoScan;
-    private long cacheMillis;
+    private int markerLimit;
+    private int textRange;
     private long intervalMillis;
     private long timeoutMillis;
     private int backups;
@@ -50,6 +50,8 @@ public final class SettingsScreen extends WorldScreen {
     private final Set<String> excludedProfessions;
     private boolean autoServerEnabled;
     private boolean autoServerAcknowledged;
+    private final boolean initialAutoServerEnabled;
+    private boolean resetAll;
     private final String currentServer;
     private EditBox datasetBox;
     private String error = "";
@@ -68,7 +70,8 @@ public final class SettingsScreen extends WorldScreen {
         this.radius = s.radius();
         this.scanTicks = s.scanTicks();
         this.autoScan = s.autoScan();
-        this.cacheMillis = s.cacheMillis();
+        this.markerLimit = s.markerLimit();
+        this.textRange = s.textRange();
         this.intervalMillis = s.intervalMillis();
         this.timeoutMillis = s.timeoutMillis();
         this.backups = s.backups();
@@ -79,6 +82,7 @@ public final class SettingsScreen extends WorldScreen {
             && s.autoServers().getOrDefault(currentServer, false);
         this.autoServerAcknowledged = currentServer != null
             && s.acknowledged().contains(currentServer);
+        this.initialAutoServerEnabled = this.autoServerEnabled;
     }
 
     public static void open(Screen parent) {
@@ -144,6 +148,19 @@ public final class SettingsScreen extends WorldScreen {
     }
 
     private void initColorRow(int innerX, int innerW, int y, int current, IntConsumer setter) {
+        if (innerW < 316) {
+            var presets = UiFormatting.COLOR_PRESETS;
+            var selected = presets.stream().filter(p -> p.argb() == current).findFirst();
+            Component label = selected.map(p -> Component.translatable(p.key()))
+                .orElseGet(() -> Component.literal(UiFormatting.formatColorHex(current)));
+            var cycle = addRenderableWidget(Button.builder(label, ignored -> {
+                int index = selected.map(p -> presets.indexOf(p)).orElse(-1);
+                setter.accept(presets.get((index + 1) % presets.size()).argb());
+                rebuildWidgets();
+            }).bounds(innerX + 148, y, innerW - 148, 18).build());
+            cycle.setTooltip(Tooltip.create(Component.translatable("vv.color.cycle")));
+            return;
+        }
         int swatchX = innerX + 148;
         int count = UiFormatting.COLOR_PRESETS.size();
         int sw = Math.min(22, Math.max(16, (innerW - 148 - (count - 1) * 3) / count));
@@ -281,26 +298,6 @@ public final class SettingsScreen extends WorldScreen {
             backups = Math.min(16, backups + 1);
             rebuildWidgets();
         }).bounds(ctrlX + 92, 106, 24, 20).build());
-
-        int bw = (innerW - 9) / 4;
-        long currentMinutes = UiFormatting.millisToMinutes(cacheMillis);
-        for (int i = 0; i < CACHE_MINUTE_PRESETS.length; i++) {
-            long min = CACHE_MINUTE_PRESETS[i];
-            boolean selected = currentMinutes == min;
-            String unitText = min >= 60
-                ? Component.translatable("vv.settings.hoursValue", min / 60).getString()
-                : Component.translatable("vv.settings.minutesValue", min).getString();
-            var btn = addRenderableWidget(Button.builder(
-                    Component.literal((selected ? "● " : "") + unitText)
-                        .withColor(selected ? 0xFF55DD88 : 0xFFE6EDF7),
-                    ignored -> {
-                        cacheMillis = UiFormatting.minutesToMillis(min);
-                        rebuildWidgets();
-                    })
-                .bounds(innerX + i * (bw + 3), 160, i == 3 ? innerW - 3 * (bw + 3) : bw, 20)
-                .build());
-            btn.setTooltip(Tooltip.create(Component.translatable("vv.cacheMillis.help")));
-        }
     }
 
     private void initToolsTab(int innerX, int innerW) {
@@ -378,13 +375,16 @@ public final class SettingsScreen extends WorldScreen {
         radius = d.radius();
         scanTicks = d.scanTicks();
         autoScan = d.autoScan();
-        cacheMillis = d.cacheMillis();
+        markerLimit = d.markerLimit();
+        textRange = d.textRange();
         intervalMillis = d.intervalMillis();
         timeoutMillis = d.timeoutMillis();
         backups = d.backups();
         dataset = d.dataset();
         excludedProfessions.clear();
         autoServerEnabled = false;
+        autoServerAcknowledged = false;
+        resetAll = true;
     }
 
     private void saveAndClose() {
@@ -394,12 +394,17 @@ public final class SettingsScreen extends WorldScreen {
             Settings current = service.settings;
             var autoServers = new java.util.HashMap<>(current.autoServers());
             var acknowledged = new HashSet<>(current.acknowledged());
-            if (currentServer != null) {
-                autoServers.put(currentServer, autoServerEnabled);
+            if (resetAll) {
+                autoServers.clear();
+                acknowledged.clear();
+            }
+            if (currentServer != null && (autoServerEnabled != initialAutoServerEnabled || resetAll)) {
+                if (autoServerEnabled) autoServers.put(currentServer, true);
+                else autoServers.remove(currentServer);
                 if (autoServerAcknowledged) acknowledged.add(currentServer);
             }
             Settings updated = new Settings(
-                3,
+                4,
                 markers,
                 statusMarks,
                 summaries,
@@ -409,9 +414,8 @@ public final class SettingsScreen extends WorldScreen {
                 radius,
                 scanTicks,
                 autoScan,
-                current.markerLimit(),
-                current.textRange(),
-                cacheMillis,
+                markerLimit,
+                textRange,
                 intervalMillis,
                 timeoutMillis,
                 backups,
@@ -421,7 +425,7 @@ public final class SettingsScreen extends WorldScreen {
                 trimmedDataset,
                 Set.copyOf(excludedProfessions));
             service.settings(updated);
-            if (currentServer != null) {
+            if (currentServer != null && (autoServerEnabled != initialAutoServerEnabled || resetAll)) {
                 if (autoServerEnabled && autoServerAcknowledged) service.probe.run();
                 else if (!autoServerEnabled) service.pause();
             }
@@ -477,10 +481,6 @@ public final class SettingsScreen extends WorldScreen {
             g.text(font, font.plainSubstrByWidth(
                 Component.translatable("vv.backups.help").getString(), innerW),
                 innerX, 130, 0xFF8CA4C4);
-            g.text(font, Component.translatable("vv.cacheMillis"), innerX, 146, 0xFFE6EDF7);
-            g.text(font, font.plainSubstrByWidth(
-                Component.translatable("vv.cacheMillis.help").getString(), innerW),
-                innerX, 185, 0xFF8CA4C4);
         } else {
             g.text(font, font.plainSubstrByWidth(
                 Component.translatable("vv.settings.toolsDesc").getString(), innerW),
@@ -512,6 +512,7 @@ public final class SettingsScreen extends WorldScreen {
     }
 
     private void drawSwatches(GuiGraphicsExtractor g, int innerX, int innerW, int y, int selected) {
+        if (innerW < 316) return;
         int swatchX = innerX + 148;
         int count = UiFormatting.COLOR_PRESETS.size();
         int sw = Math.min(22, Math.max(16, (innerW - 148 - (count - 1) * 3) / count));
@@ -536,7 +537,7 @@ public final class SettingsScreen extends WorldScreen {
         var s = service.settings;
         service.settings(
             new Settings(
-                3,
+                4,
                 !s.markers(),
                 s.statusMarks(),
                 s.summaries(),
@@ -548,7 +549,6 @@ public final class SettingsScreen extends WorldScreen {
                 s.autoScan(),
                 s.markerLimit(),
                 s.textRange(),
-                s.cacheMillis(),
                 s.intervalMillis(),
                 s.timeoutMillis(),
                 s.backups(),
@@ -571,7 +571,7 @@ public final class SettingsScreen extends WorldScreen {
             return;
         }
         if (service.probe.running()) {
-            service.pause();
+            service.enable(false);
             feedback.accept(Component.translatable("vv.feedback.probePaused"));
             return;
         }

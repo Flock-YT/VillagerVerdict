@@ -17,8 +17,7 @@ import net.minecraft.network.chat.Component;
 public final class VillagerEditScreen extends WorldScreen {
     private static final VillagerRecord.Manual[] OPTIONS = {
         VillagerRecord.Manual.AUTO,
-        VillagerRecord.Manual.PROTECT,
-        VillagerRecord.Manual.REMOVE
+        VillagerRecord.Manual.KEEP
     };
 
     private final Screen parent;
@@ -54,7 +53,7 @@ public final class VillagerEditScreen extends WorldScreen {
         int px = panelX();
         int pw = panelWidth();
         int innerW = pw - 20;
-        int btnW = (innerW - 8) / 3;
+        int btnW = (innerW - 4) / 2;
         int startX = px + 10;
 
         for (int i = 0; i < OPTIONS.length; i++) {

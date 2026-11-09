@@ -21,28 +21,26 @@ class StorageTest {
     try (var s = new JsonStore(e -> fail(e))) {
       s.save(
           path,
-          new WorldData(
-              2,
+          new WorldData(4,
               id,
-              List.of(AnalysisTest.v(1, AnalysisTest.trade(5, AnalysisTest.book(4)))),
+              List.of(CachedTrade.from(AnalysisTest.v(1, AnalysisTest.trade(5, AnalysisTest.book(4))))),
               List.of(),
               List.of()));
       s.save(
           path,
-          new WorldData(
-              2,
+          new WorldData(4,
               id,
-              List.of(AnalysisTest.v(1, AnalysisTest.trade(2, AnalysisTest.book(5)))),
+              List.of(CachedTrade.from(AnalysisTest.v(1, AnalysisTest.trade(2, AnalysisTest.book(5))))),
               List.of(),
               List.of()));
       s.flush().get();
     }
     try (var s = new JsonStore(e -> fail(e))) {
       var data = s.read(path, WorldData.class, () -> WorldData.empty(id)).get();
-      assertEquals(1, data.villagers().size());
+      assertEquals(1, data.cachedTrades().size());
       assertEquals(
           5,
-          data.villagers()
+          data.cachedTrades()
               .getFirst()
               .snapshot()
               .trades()
@@ -145,16 +143,9 @@ class StorageTest {
   }
 
   @Test
-  void legacyEnvelopeUpgradesOnNextWrite() throws Exception {
-    var p = dir.resolve("old.json");
-    try (var s = new JsonStore(e -> fail(e))) {
-      s.save(p, new WorldData(1, id, List.of(), List.of(), List.of()));
-      s.flush().get();
-      var d = s.read(p, WorldData.class, () -> WorldData.empty(id)).get();
-      s.save(p, new WorldData(2, d.identity(), d.villagers(), d.targets(), d.regions()));
-      s.flush().get();
-      assertEquals(2, s.read(p, WorldData.class, () -> WorldData.empty(id)).get().version());
-    }
+  void rejectsOldWorldEnvelope() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new WorldData(3, id, List.of(), List.of(), List.of()));
   }
 
   @Test
@@ -172,14 +163,14 @@ class StorageTest {
   }
 
   @Test
-  void rejectDuplicateUUIDAndWrongWorld() {
-    var v = AnalysisTest.v(1);
+  void rejectDuplicateUUIDAndInvalidCachedTrade() {
+    var v = CachedTrade.from(AnalysisTest.v(1));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new WorldData(2, id, List.of(v, v), List.of(), List.of()));
+        () -> new WorldData(4, id, List.of(v, v), List.of(), List.of()));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new WorldData(2, new WorldIdentity("x", "x", "x"), List.of(v), List.of(), List.of()));
+        NullPointerException.class,
+        () -> new CachedTrade(v.uuid(), v.profession(), null));
   }
 
   @Test
@@ -200,52 +191,41 @@ class StorageTest {
             List.of(target),
             0xFF99AAFF);
     var data =
-        new WorldData(
-            2,
+        new WorldData(4,
             id,
-            List.of(AnalysisTest.v(1, AnalysisTest.trade(5, AnalysisTest.book(4)))),
+            List.of(CachedTrade.from(AnalysisTest.v(1, AnalysisTest.trade(5, AnalysisTest.book(4))))),
             List.of(target),
             List.of(region));
 
     var cleared = data.clearVillagers();
-    assertTrue(cleared.villagers().isEmpty());
+    assertTrue(cleared.cachedTrades().isEmpty());
     assertEquals(data.identity(), cleared.identity());
     assertEquals(data.targets(), cleared.targets());
     assertEquals(data.regions(), cleared.regions());
   }
 
   @Test
-  void configurationVersionOneMigrates() throws Exception {
-    var p = dir.resolve("v1.json");
-    try (var s = new JsonStore(e -> fail(e))) {
-      s.save(p, Settings.defaults());
-      s.flush().get();
-      String json =
-          Files.readString(p)
-              .replace("\"version\": 3", "\"version\": 1")
-              .replace("\"statusMarks\": true,", "");
-      Files.writeString(p, json);
-      var settings = s.read(p, Settings.class, Settings::defaults).get();
-      assertEquals(3, settings.version());
-      assertTrue(settings.statusMarks());
-      assertTrue(settings.autoScan());
+  void currentSettingsRoundTripWithoutFreshnessFields() throws Exception {
+    var p = dir.resolve("settings.json");
+    try (var store = new JsonStore(e -> fail(e))) {
+      store.save(p, Settings.defaults());
+      store.flush().get();
+      assertEquals(Settings.defaults(), store.read(p, Settings.class, Settings::defaults).get());
+      assertFalse(Files.readString(p).contains("cacheMillis"));
+      assertEquals(4, Settings.defaults().version());
     }
   }
 
   @Test
-  void configurationVersionTwoDefaultsAutoScanOn() throws Exception {
-    var p = dir.resolve("v2.json");
-    try (var s = new JsonStore(e -> fail(e))) {
-      s.save(p, Settings.defaults());
-      s.flush().get();
-      String json =
-          Files.readString(p)
-              .replace("\"version\": 3", "\"version\": 2")
-              .replace("\"autoScan\": true,", "");
-      Files.writeString(p, json);
-      var settings = s.read(p, Settings.class, Settings::defaults).get();
-      assertEquals(3, settings.version());
-      assertTrue(settings.autoScan());
+  void oldSettingsAreRejectedWithoutMigration() throws Exception {
+    var p = dir.resolve("old-settings.json");
+    try (var store = new JsonStore(e -> {})) {
+      store.save(p, Settings.defaults());
+      store.flush().get();
+      Files.writeString(p, Files.readString(p).replace("\"version\": 4", "\"version\": 3"));
+      assertThrows(ExecutionException.class,
+          () -> store.read(p, Settings.class, Settings::defaults).get());
+      assertTrue(store.blocked(p));
     }
   }
 }

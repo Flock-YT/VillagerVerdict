@@ -10,7 +10,7 @@
 | 04 | 注册表职业和等级 | `VerdictService.scan` | 集成：图书管理员、农民及失业职业转换 |
 | 05 | 幼年/无业/傻子排除扫描、存储、列表和探测 | `VillagerRecord.tradable` | 单元及真实客户端集成，包含获得/失去职业与转职快照清理 |
 | 06 | 服务器/存档/数据集/维度/UUID 隔离 | `WorldIdentity / VerdictService.switchWorld` | 单元与双存档集成 |
-| 07 | 实时索引与持久记录分离 | `VerdictService.loaded / records` | 代码；卸载生命周期未完整实测 |
+| 07 | 附近活动记录与交易缓存分离 | `VerdictService.records / tradeCache` | 范围退出、缓存复用及死亡清理集成验证 |
 | 08 | 正常人工交互捕获 | `UseEntityCallback / VerdictService.offers` | 真实交易包集成 |
 | 09 | 基础/实际/第二输入/输出 | `Trade / ItemCodecAdapter` | 单元与普通物品集成 |
 | 10 | Codec 和当前注册表保存组件 | `ItemCodecAdapter` | 普通物品集成；复杂组件未实测 |
@@ -21,7 +21,7 @@
 | 15 | 商品比较组独立 | `CommodityKey / Optimizer` | 单元 |
 | 16 | 单位产出/不同资源/双输入向量 | `TradeComparison / Trade.cost` | 单元 |
 | 17 | 基础与实际价格分离 | `TradeComparison / ComparisonResult` | 单元与详情截图 |
-| 18 | 当前/未解锁/未知/过期完整度 | `TradeSnapshot.Completeness / VerdictScreen` | 单元与详情截图 |
+| 18 | 交易最新快照与读取时间 | `TradeSnapshot / VerdictScreen` | 单元及真实重复读取集成 |
 | 19 | 新旧仅内存比较并覆盖 | `SnapshotDelta / VerdictService.offers` | 单元 |
 | 20 | 记录变更更新分析和索引 | `VerdictService.changed / analyze` | 集成；后台代次校验 |
 | 21 | 高级附魔优先于价格 | `ItemData.dominates / TradeComparison` | 单元 |
@@ -31,11 +31,11 @@
 | 25 | 目标价格条件和最低保留数 | `TargetTrade / Optimizer` | 单元 |
 | 26 | 确定性贪心多重覆盖 | `Optimizer` | 单元及 500/4000 基准 |
 | 27 | 冗余移除和不可满足约束 | `Optimizer` | 单元 |
-| 28 | 保护/人工保留固定纳入 | `VillagerRecord.fixed / Optimizer` | 单元 |
-| 29 | 人工淘汰排除并报缺口 | `Optimizer` | 单元；状态互斥，保护需显式切换才能解除 |
+| 28 | 人工保留固定纳入 | `VillagerRecord.fixed / Optimizer` | 单元 |
+| 29 | 目标范围外自动判为不保留 | `Optimizer` | 单元；目标筛选覆盖 |
 | 30 | 综合所有交易而非单交易定性 | `Optimizer` | 交叉交易覆盖单元 |
-| 31 | 绿/黄/红状态 | `AnalysisResult / Optimizer / renderer` | 单元及普通世界截图 |
-| 32 | 高/中/低置信度与未来交易风险 | `Optimizer` | 单元 |
+| 31 | 绿保留/红不保留/黄未扫描三状态 | `DisplayStatus / Optimizer / renderer` | 单元及真实客户端筛选、标记验证 |
+| 32 | 扫描后持续重读并更新保留结论 | `Optimizer / VerdictService` | 单元与真实附魔升级后红转绿集成 |
 | 33 | 替代 UUID/坐标/交易/价差及跳转 | `ComparisonResult / VerdictScreen.details` | 单元；点击跳转未专项实测 |
 | 34 | 扫描半径内全部职业成年村民状态标记 | `EntityRendererMixin / prepared Marker` | 301 场景；视觉细节未完整验收 |
 | 35 | 扫描半径内多行职业标记，不受旧文字距离设置截断 | `ProfessionHighlights / MarkerText / MarkerRenderer` | 13 种职业筛选单元测试；双语真实交易、附魔最高等级、钻石装备、自定义名称、全部开关、状态复用、转职、隔墙及远近/拥挤截图 |
@@ -49,7 +49,7 @@
 | 43 | 价格/等级/距离/职业/综合排序 | `VerdictScreen.filtered` | 单元价格；所有 GUI 排序未逐项操作 |
 | 44 | 全交易、图标、提示、备注和标签 | `VerdictScreen / FormScreen` | 详情/图标截图；备注标签 CRUD 未完整实测 |
 | 45 | 目标完整编辑/删除 | `VerdictScreen.target / FormScreen` | 集成创建；编辑删除未逐项实测 |
-| 46 | 颜色、频率、缓存、提醒设置 | `SettingsScreen` | 表单截图；全字段修改未完整实测 |
+| 46 | 颜色、频率、提醒及完整重置 | `SettingsScreen` | 窄窗口边界断言、颜色截图、隐藏字段和跨服务器自启记录重置 |
 | 47 | 单写入队列与合并 | `JsonStore` | 100 次写入单元及真实场景 |
 | 48 | 损坏/未来版本写保护 | `JsonStore.read` | 单元 |
 | 49 | 最新快照、重启和迁移 | `WorldData / JsonStore / Settings` | 单元 |
@@ -57,11 +57,11 @@
 | 51 | 同维度长方体区域创建/编辑 | `TradingHallRegion / VerdictScreen.region` | 单元与创建集成 |
 | 52 | 重叠区域独立分析和目标 | `VerdictService.regional / updateTarget` | 代码；重叠实际场景未验证 |
 | 53 | 只统计当前已发现加载对象 | `VerdictService.stats` | 集成；无业对象单独统计 |
-| 54 | 最近待检查导航及卸载最后位置 | `navigateNext / HUD / ShortcutActions` | 真实导航快捷键及坐标提示通过；无目标提示通过；卸载后的完整导航路径未专项实测 |
+| 54 | 扫描范围内未读取村民导航 | `navigateNext / HUD / ShortcutActions` | 真实导航快捷键、范围退出清理及无目标提示验证 |
 | 55 | 自动探测默认关闭/按服务器保存 | `Settings.autoServers / ProbeController` | 单元与集成 |
 | 56 | 首次启用额外交互说明 | `SettingsScreen.toggleProbe / WorldConfirmScreen` | 真实快捷键打开、确认/取消、探测开启/暂停及 Action Bar 提示通过 |
 | 57 | 串行队列及正常/异常状态链 | `ProbeController` | 18 项状态机单元 |
-| 58 | 间隔/超时/冷却/缓存/退避/三超时停止 | `ProbeController / Settings` | 单元；真实成功流程集成 |
+| 58 | 间隔/超时/冷却/持续重读/退避/三超时停止 | `ProbeController / Settings` | 单元；真实重复读取集成 |
 | 59 | GUI/光标/双手/潜行/距离/遮挡门槛 | `VerdictService.safeBaseline / hitPoint` | 正常门槛集成；所有拒绝条件未逐项实测 |
 | 60 | 无界面保留菜单同步并安全关闭 | `GuiMixin / PacketListenerMixin / VerdictService` | 真实交易包与菜单集成 |
 | 61 | 人工优先、错配停止、世界切换取消 | `ProbeController / Fabric callbacks` | 单元和世界切换；真实争用未验证 |
@@ -105,7 +105,7 @@
 | 3 世界身份和数据集 | WorldIdentity / switchWorld |
 | 4 实体生命周期索引 | VerdictService.load / unload |
 | 5 距离扫描和附近清单 | VerdictService.scan |
-| 6 持久记录与人工状态 | VillagerRecord / VerdictService.edit |
+| 6 交易缓存与临时人工保留 | VillagerRecord / VerdictService.edit |
 | 7 异步版本化存储 | WorldData / JsonStore |
 | 8 游戏物品组件适配 | ItemCodecAdapter |
 | 9 协议接入与窗口关联 | ClientPacketListenerMixin / Context |
@@ -114,7 +114,7 @@
 | 12 菜单抑制、安全关闭和恢复 | GuiMixin / VerdictService |
 | 13 成本和商品比较 | Trade / TradeKey / CommodityKey / TradeComparison |
 | 14 保留集合规划 | Optimizer |
-| 15 原因、置信度和替代说明 | ComparisonResult / AnalysisResult |
+| 15 原因和替代说明 | ComparisonResult / AnalysisResult |
 | 16 目标与价格条件 | TargetTrade / updateTarget |
 | 17 区域及独立分析 | TradingHallRegion / regional |
 | 18 管理 GUI、搜索、滚动和表单 | VerdictScreen / FormScreen |

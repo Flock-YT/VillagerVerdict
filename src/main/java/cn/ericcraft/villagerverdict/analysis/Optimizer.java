@@ -14,9 +14,6 @@ public final class Optimizer {
   public AnalysisResult analyze(
       Collection<VillagerRecord> input,
       List<TargetTrade> targets,
-      Set<UUID> loaded,
-      long now,
-      long ttl,
       int backups) {
     var records = input.stream().sorted(Comparator.comparing(v -> v.uuid().toString())).toList();
     var known = records.stream().filter(v -> v.snapshot() != null).toList();
@@ -85,20 +82,20 @@ public final class Optimizer {
       covers.put(v.uuid(), set);
     }
     var selected = new LinkedHashSet<UUID>();
-    records.stream().filter(VillagerRecord::fixed).forEach(v -> selected.add(v.uuid()));
+    known.stream().filter(VillagerRecord::fixed).forEach(v -> selected.add(v.uuid()));
     int[] counts = new int[demands.size()];
     selected.forEach(id -> covers.getOrDefault(id, Set.of()).forEach(i -> counts[i]++));
     while (true) {
       VillagerRecord best = null;
       int gain = 0;
       for (var v : known)
-        if (!selected.contains(v.uuid()) && v.manual() != VillagerRecord.Manual.REMOVE) {
+        if (!selected.contains(v.uuid())) {
           int g =
               (int)
                   covers.get(v.uuid()).stream()
                       .filter(i -> counts[i] < demands.get(i).count)
                       .count();
-          if (g > gain || g > 0 && g == gain && prefer(v, best, loaded, now, ttl) < 0) {
+          if (g > gain || g > 0 && g == gain && prefer(v, best) < 0) {
             gain = g;
             best = v;
           }
@@ -140,29 +137,16 @@ public final class Optimizer {
         gaps.add(d.target.item() + " " + d.target.enchantment() + ": price condition unmet");
     }
     var verdicts = new LinkedHashMap<UUID, Verdict>();
-    for (var v : records) {
+    for (var v : known) {
       if (v.fixed()) {
         verdicts.put(
             v.uuid(),
             new Verdict(
                 Status.KEEP,
-                Confidence.HIGH,
                 "manual protection / keep",
                 List.of(),
                 0,
                 covers.getOrDefault(v.uuid(), Set.of()).size()));
-        continue;
-      }
-      if (v.snapshot() == null || v.snapshot().trades().isEmpty()) {
-        verdicts.put(
-            v.uuid(),
-            new Verdict(
-                Status.REVIEW,
-                Confidence.LOW,
-                "uninspected or completeness unknown",
-                List.of(),
-                0,
-                0));
         continue;
       }
       var reasons = new ArrayList<ComparisonResult>();
@@ -173,7 +157,7 @@ public final class Optimizer {
         for (var b : known)
           if (!b.uuid().equals(v.uuid()) && selected.contains(b.uuid()))
             for (var a : b.snapshot().trades())
-              if (replaces(a, t) && (alt == null || prefer(b, alt, loaded, now, ttl) < 0)) {
+              if (replaces(a, t) && (alt == null || prefer(b, alt) < 0)) {
                 alt = b;
                 trade = a;
               }
@@ -189,36 +173,18 @@ public final class Optimizer {
                   trade,
                   difference(trade, t, false),
                   difference(trade, t, true),
-                  trade.output().higherThan(t.output()),
-                  loaded.contains(alt.uuid()) && !alt.snapshot().stale(now, ttl)));
+                  trade.output().higherThan(t.output())));
       }
-      boolean stale = v.snapshot().stale(now, ttl);
-      boolean confirmed = reasons.stream().allMatch(ComparisonResult::confirmed);
-      var confidence =
-          stale || v.snapshot().completeness() != TradeSnapshot.Completeness.CURRENT
-              ? Confidence.LOW
-              : confirmed && loaded.contains(v.uuid()) ? Confidence.HIGH : Confidence.MEDIUM;
-      var status =
-          stale
-              ? Status.REVIEW
-              : selected.contains(v.uuid())
-                  ? Status.KEEP
-                  : stale || unique > 0 || !confirmed ? Status.REVIEW : Status.REDUNDANT;
+      var status = selected.contains(v.uuid()) ? Status.KEEP : Status.DISCARD;
       String reason =
           status == Status.KEEP
               ? "coverage / unique value"
-              : status == Status.REDUNDANT
-                  ? "all known trades have replacements"
-                  : stale ? "cached trades expired"
-                  : unique > 0 ? "known trades lack retained replacements"
-                  : "replacement unloaded or expired";
-      if (v.manual() == VillagerRecord.Manual.REMOVE) reason = "manual exclusion; " + reason;
-      if (v.snapshot().completeness() != TradeSnapshot.Completeness.CURRENT) reason += "; unknown future trades";
+              : "all known trades have replacements";
+      if (status == Status.DISCARD && unique > 0) reason = "outside target scope";
       verdicts.put(
           v.uuid(),
           new Verdict(
               status,
-              confidence,
               reason,
               reasons,
               unique,
@@ -232,16 +198,12 @@ public final class Optimizer {
         && a.cost(false).keySet().equals(b.cost(false).keySet());
   }
 
-  private int prefer(VillagerRecord a, VillagerRecord b, Set<UUID> loaded, long now, long ttl) {
+  private int prefer(VillagerRecord a, VillagerRecord b) {
     if (b == null) return -1;
-    int c =
-        Boolean.compare(
-            !loaded.contains(a.uuid()) || a.snapshot().stale(now, ttl),
-            !loaded.contains(b.uuid()) || b.snapshot().stale(now, ttl));
-    if (c != 0) return c;
     // Lexicographic, resource-aware vector: no exchange rate between different currencies.
     var ap = a.snapshot().trades().stream().sorted(priceOrder()).toList();
     var bp = b.snapshot().trades().stream().sorted(priceOrder()).toList();
+    int c;
     for (int i = 0; i < Math.min(ap.size(), bp.size()); i++) {
       c = vectorOrder(ap.get(i).cost(false), bp.get(i).cost(false));
       if (c != 0) return c;

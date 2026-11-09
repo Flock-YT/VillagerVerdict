@@ -34,7 +34,7 @@ class AnalysisTest {
         64,
         0,
         100,
-        new TradeSnapshot(List.of(trades), 5, 100, TradeSnapshot.Completeness.CURRENT),
+        new TradeSnapshot(List.of(trades), 100),
         VillagerRecord.Manual.AUTO,
         "",
         Set.of());
@@ -43,13 +43,26 @@ class AnalysisTest {
   static AnalysisResult analyze(
       List<VillagerRecord> records, List<TargetTrade> targets, int backups) {
     return new Optimizer()
-        .analyze(
-            records,
-            targets,
-            records.stream().map(VillagerRecord::uuid).collect(java.util.stream.Collectors.toSet()),
-            100,
-            1000,
-            backups);
+        .analyze(records, targets, backups);
+  }
+
+  @Test
+  void betterTradeChangesDiscardToKeepOnRescan() {
+    var best = v(1, trade(5, book(3)));
+    var worker = v(2, trade(10, book(1)));
+    var before = analyze(List.of(best, worker), List.of(), 1);
+    assertEquals(AnalysisResult.Status.DISCARD, before.verdicts().get(worker.uuid()).status());
+    worker = worker.withSnapshot(new TradeSnapshot(List.of(trade(10, book(1)), trade(20, book(5))), 200));
+    var after = analyze(List.of(best, worker), List.of(), 1);
+    assertEquals(AnalysisResult.Status.KEEP, after.verdicts().get(worker.uuid()).status());
+    assertEquals(AnalysisResult.Status.DISCARD, after.verdicts().get(best.uuid()).status());
+  }
+
+  @Test
+  void successfulEmptyReadCountsAsScannedDiscard() {
+    var worker = v(1);
+    assertEquals(AnalysisResult.Status.DISCARD,
+        analyze(List.of(worker), List.of(), 1).verdicts().get(worker.uuid()).status());
   }
 
   @Test
@@ -159,17 +172,9 @@ class AnalysisTest {
   @Test
   void protectedIsAlwaysRetained() {
     var a = v(1, trade(10, book(4)));
-    a = a.withManual(VillagerRecord.Manual.PROTECT, "", Set.of());
+    a = a.withManual(VillagerRecord.Manual.KEEP, "", Set.of());
     var b = v(2, trade(20, book(5)));
     assertEquals(2, analyze(List.of(a, b), List.of(), 1).recommended().size());
-  }
-
-  @Test
-  void excludedReportsGap() {
-    var a = v(1, trade(1, book(5))).withManual(VillagerRecord.Manual.REMOVE, "", Set.of());
-    var r = analyze(List.of(a), List.of(), 1);
-    assertTrue(r.recommended().isEmpty());
-    assertFalse(r.gaps().isEmpty());
   }
 
   @Test
@@ -188,11 +193,11 @@ class AnalysisTest {
     var b = v(2, trade(1, item("apple", 1)));
     var r = analyze(List.of(a, b), List.of(new TargetTrade("s", "book", "sharpness", 1, 0, 1)), 1);
     assertEquals(Set.of(a.uuid()), r.recommended());
-    assertEquals(AnalysisResult.Status.REVIEW, r.verdicts().get(b.uuid()).status());
+    assertEquals(AnalysisResult.Status.DISCARD, r.verdicts().get(b.uuid()).status());
   }
 
   @Test
-  void uninspectedIsYellow() {
+  void uninspectedIsNotAnalyzed() {
     var a =
         new VillagerRecord(
             WORLD,
@@ -208,31 +213,26 @@ class AnalysisTest {
             VillagerRecord.Manual.AUTO,
             "",
             Set.of());
-    assertEquals(
-        AnalysisResult.Status.REVIEW,
-        analyze(List.of(a), List.of(), 1).verdicts().get(a.uuid()).status());
+    assertFalse(analyze(List.of(a), List.of(), 1).verdicts().containsKey(a.uuid()));
   }
 
   @Test
-  void futureTradesReduceConfidence() {
+  void scannedRecordsDoNotCarryCompletenessState() {
     var a = v(1, trade(1, book(5)));
     var b = v(2, trade(10, book(4)));
     b =
         b.withSnapshot(
-            new TradeSnapshot(
-                b.snapshot().trades(), 1, 100, TradeSnapshot.Completeness.UNLOCKED_LEVELS_REMAIN));
+            new TradeSnapshot(b.snapshot().trades(), 100));
     var r = analyze(List.of(a, b), List.of(), 1);
-    assertEquals(AnalysisResult.Confidence.LOW, r.verdicts().get(b.uuid()).confidence());
-    assertEquals(AnalysisResult.Status.REDUNDANT, r.verdicts().get(b.uuid()).status());
+    assertEquals(AnalysisResult.Status.DISCARD, r.verdicts().get(b.uuid()).status());
   }
 
   @Test
-  void unloadedReplacementCannotConfirm() {
+  void replacementUsesLatestRecordRegardlessOfLoadState() {
     var a = v(1, trade(1, book(5)));
     var b = v(2, trade(10, book(4)));
-    var r = new Optimizer().analyze(List.of(a, b), List.of(), Set.of(b.uuid()), 100, 1000, 1);
-    assertEquals(AnalysisResult.Status.REVIEW, r.verdicts().get(b.uuid()).status());
-    assertFalse(r.verdicts().get(b.uuid()).replacements().getFirst().confirmed());
+    var r = analyze(List.of(a, b), List.of(), 1);
+    assertEquals(AnalysisResult.Status.DISCARD, r.verdicts().get(b.uuid()).status());
   }
 
   @Test
@@ -299,17 +299,17 @@ class AnalysisTest {
   }
 
   @Test
-  void staleRecommendedRecordStillNeedsReview() {
+  void latestSnapshotRemainsUsableWithoutExpiry() {
     var a = v(1, trade(1, book(5)));
-    var r = new Optimizer().analyze(List.of(a), List.of(), Set.of(a.uuid()), 2000, 1000, 1);
+    var r = analyze(List.of(a), List.of(), 1);
     assertTrue(r.recommended().contains(a.uuid()));
-    assertEquals(AnalysisResult.Status.REVIEW, r.verdicts().get(a.uuid()).status());
+    assertEquals(AnalysisResult.Status.KEEP, r.verdicts().get(a.uuid()).status());
   }
 
   @Test
-  void protectedRecordOverridesStaleness() {
-    var a = v(1, trade(1, book(5))).withManual(VillagerRecord.Manual.PROTECT, "", Set.of());
-    var r = new Optimizer().analyze(List.of(a), List.of(), Set.of(), 2000, 1000, 1);
+  void manuallyKeptRecordOverridesRecommendations() {
+    var a = v(1, trade(1, book(5))).withManual(VillagerRecord.Manual.KEEP, "", Set.of());
+    var r = analyze(List.of(a), List.of(), 1);
     assertEquals(AnalysisResult.Status.KEEP, r.verdicts().get(a.uuid()).status());
   }
 }

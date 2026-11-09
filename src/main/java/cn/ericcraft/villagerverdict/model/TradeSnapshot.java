@@ -3,24 +3,14 @@ package cn.ericcraft.villagerverdict.model;
 import java.util.*;
 
 public record TradeSnapshot(
-    List<Trade> trades, int level, long checkedAt, Completeness completeness) {
-  public enum Completeness {
-    CURRENT,
-    UNLOCKED_LEVELS_REMAIN,
-    UNKNOWN
-  }
+    List<Trade> trades, long checkedAt) {
 
   public TradeSnapshot {
     trades = List.copyOf(trades);
-    Objects.requireNonNull(completeness);
-  }
-
-  public boolean stale(long now, long ttl) {
-    return now < checkedAt || now - checkedAt >= ttl;
   }
 
   public String fingerprint() {
-    var key = new StringBuilder().append(level).append(";");
+    var key = new StringBuilder();
     for (var t : trades) {
       for (var item : Arrays.asList(t.baseInput(), t.actualInput(), t.secondInput(), t.output())) {
         String json =

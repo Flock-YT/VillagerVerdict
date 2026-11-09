@@ -12,26 +12,26 @@ import org.junit.jupiter.api.Test;
 
 class DisplayStatusTest {
     @Test
-    void distinguishesPendingFreshReviewAnalysisAndExpired() {
+    void exposesOnlyScannedKeepDiscardStates() {
         var record = v(1, trade(1, book(5)));
         var unscanned = new VillagerRecord(record.world(), record.uuid(), record.profession(), record.level(),
             record.baby(), record.x(), record.y(), record.z(), record.lastSeen(), null,
             record.manual(), record.note(), record.tags());
-        assertEquals(PENDING, resolve(unscanned, AnalysisResult.Status.REVIEW, 100, 1000));
-        assertEquals(REVIEW, resolve(record, AnalysisResult.Status.REVIEW, 100, 1000));
-        assertEquals(ANALYZING, resolve(record, null, 100, 1000));
-        assertEquals(STALE, resolve(record, AnalysisResult.Status.KEEP, 1100, 1000));
-        assertEquals(STALE, resolve(record, AnalysisResult.Status.KEEP, 99, 1000));
-        assertEquals(KEEP, resolve(record.withManual(VillagerRecord.Manual.PROTECT, "", Set.of()), null, 1100, 1000));
+        assertEquals(UNSCANNED, resolve(unscanned, null));
+        assertEquals(DISCARD, resolve(record, AnalysisResult.Status.DISCARD));
+        assertEquals(UNSCANNED, resolve(record, null));
+        assertEquals(KEEP, resolve(record, AnalysisResult.Status.KEEP));
+        assertEquals(KEEP, resolve(record.withManual(VillagerRecord.Manual.KEEP, "", Set.of()), null));
+        assertEquals(UNSCANNED, resolve(unscanned.withManual(VillagerRecord.Manual.KEEP, "", Set.of()), null));
+        assertEquals(3, values().length);
     }
 
     @Test
-    void futureLevelsDoNotMeanUnscanned() {
+    void scannedRecordsDoNotCarryCompletenessState() {
         var record = v(1, trade(1, book(5)));
-        record = record.withSnapshot(new TradeSnapshot(record.snapshot().trades(), 1, 100,
-            TradeSnapshot.Completeness.UNLOCKED_LEVELS_REMAIN));
-        assertEquals(KEEP, resolve(record, AnalysisResult.Status.KEEP, 100, 1000));
-        assertEquals(REDUNDANT, resolve(record, AnalysisResult.Status.REDUNDANT, 100, 1000));
+        record = record.withSnapshot(new TradeSnapshot(record.snapshot().trades(), 100));
+        assertEquals(KEEP, resolve(record, AnalysisResult.Status.KEEP));
+        assertEquals(DISCARD, resolve(record, AnalysisResult.Status.DISCARD));
     }
 
     @Test

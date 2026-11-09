@@ -7,7 +7,7 @@ import java.util.*;
 public record SnapshotDelta(boolean price, boolean stock, boolean unlocked) {
   public static SnapshotDelta between(TradeSnapshot before, TradeSnapshot after) {
     if (before == null) return new SnapshotDelta(false, false, !after.trades().isEmpty());
-    boolean price = false, stock = false, unlocked = after.level() > before.level();
+    boolean price = false, stock = false, unlocked = false;
     for (var t : after.trades()) {
       var old =
           before.trades().stream()

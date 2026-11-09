@@ -17,9 +17,8 @@ class PriceCoverageTest {
         assertTrue(result.recommended().contains(cheap.uuid()));
         assertEquals(2, result.recommended().size());
         var redundant = result.recommended().contains(generalist.uuid()) ? glass : generalist;
-        assertEquals(AnalysisResult.Status.REDUNDANT, result.verdicts().get(redundant.uuid()).status());
+        assertEquals(AnalysisResult.Status.DISCARD, result.verdicts().get(redundant.uuid()).status());
         assertTrue(result.gaps().isEmpty());
-        assertTrue(result.verdicts().values().stream().noneMatch(r -> r.status() == AnalysisResult.Status.REVIEW));
     }
 
     @Test
@@ -29,7 +28,7 @@ class PriceCoverageTest {
         var cheapGlass = v(2, trade(1, item("glass", 1)));
         var result = analyze(List.of(generalist, cheapBook, cheapGlass), List.of(), 1);
         assertEquals(Set.of(cheapBook.uuid(), cheapGlass.uuid()), result.recommended());
-        assertEquals(AnalysisResult.Status.REDUNDANT, result.verdicts().get(generalist.uuid()).status());
+        assertEquals(AnalysisResult.Status.DISCARD, result.verdicts().get(generalist.uuid()).status());
     }
 
     @Test

@@ -13,7 +13,8 @@ public final class MarkerText {
 
     public static List<Component> lines(VillagerRecord record, AnalysisResult.Status status,
         boolean statusMarks, boolean summaries) {
-        return lines(record, DisplayStatus.valueOf(status.name()), statusMarks, summaries);
+        return lines(record, status == null ? DisplayStatus.UNSCANNED
+            : DisplayStatus.valueOf(status.name()), statusMarks, summaries);
     }
 
     public static List<Component> lines(VillagerRecord record, DisplayStatus status,

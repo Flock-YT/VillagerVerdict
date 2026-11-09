@@ -18,9 +18,7 @@ public record VillagerRecord(
     Set<String> tags) {
   public enum Manual {
     AUTO,
-    KEEP,
-    PROTECT,
-    REMOVE
+    KEEP
   }
 
   public VillagerRecord {
@@ -41,12 +39,12 @@ public record VillagerRecord(
   }
 
   public boolean fixed() {
-    return manual == Manual.KEEP || manual == Manual.PROTECT;
+    return manual == Manual.KEEP;
   }
 
   public VillagerRecord withSnapshot(TradeSnapshot s) {
     return new VillagerRecord(
-        world, uuid, profession, s.level(), baby, x, y, z, lastSeen, s, manual, note, tags);
+        world, uuid, profession, level, baby, x, y, z, lastSeen, s, manual, note, tags);
   }
 
   public VillagerRecord withManual(Manual m, String n, Set<String> t) {

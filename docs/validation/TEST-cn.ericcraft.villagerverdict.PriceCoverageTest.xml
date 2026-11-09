@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="cn.ericcraft.villagerverdict.PriceCoverageTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-08T18:07:07.667Z" hostname="Mac-Mini.local" time="0.006">
+<testsuite name="cn.ericcraft.villagerverdict.PriceCoverageTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-09T07:19:06.377Z" hostname="Mac-Mini.local" time="0.004">
   <properties/>
-  <testcase name="cheaperSpecialistDisplacesExpensiveGeneralistWhenOtherGoodsAreCovered()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.002"/>
+  <testcase name="cheaperSpecialistDisplacesExpensiveGeneralistWhenOtherGoodsAreCovered()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.001"/>
   <testcase name="protectsBestPriceForTargetsAndRemainsDeterministic()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.001"/>
   <testcase name="redundantGeneralistIsRemovedAfterCheaperSpecialistsAreAdded()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.0"/>
-  <testcase name="targetsDoNotAddPriceDemandsForUnrelatedGoods()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.0"/>
+  <testcase name="targetsDoNotAddPriceDemandsForUnrelatedGoods()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.001"/>
   <testcase name="preservesBothIncomparableMaterialPrices()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.0"/>
-  <testcase name="expensiveGeneralistWithUniqueGoodsIsRetainedAlongsideCheapSpecialist()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.001"/>
-  <testcase name="guaranteesBestPriceEvenWhenBackupAndOtherGoodsFavorExpensiveTraders()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.0"/>
+  <testcase name="expensiveGeneralistWithUniqueGoodsIsRetainedAlongsideCheapSpecialist()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.0"/>
+  <testcase name="guaranteesBestPriceEvenWhenBackupAndOtherGoodsFavorExpensiveTraders()" classname="cn.ericcraft.villagerverdict.PriceCoverageTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

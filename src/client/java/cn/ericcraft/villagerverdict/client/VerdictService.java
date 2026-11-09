@@ -53,6 +53,7 @@ public final class VerdictService {
   private long analysisRevision;
   private final Map<UUID, Villager> loaded = new LinkedHashMap<>();
   private final Map<UUID, VillagerRecord> records = new LinkedHashMap<>();
+  private final Map<UUID, CachedTrade> tradeCache = new LinkedHashMap<>();
   private final Map<UUID, String> notifications = new HashMap<>();
   public List<TargetTrade> targets = new ArrayList<>();
   public List<TradingHallRegion> regions = new ArrayList<>();
@@ -66,7 +67,7 @@ public final class VerdictService {
     }
   }
 
-  public record StoredWorld(WorldIdentity identity, int villagers, boolean current) {}
+  public record StoredWorld(WorldIdentity identity, int cachedTrades, boolean current) {}
 
   public Map<UUID, Marker> markers = Map.of();
   public Set<UUID> nearby = Set.of();
@@ -83,7 +84,6 @@ public final class VerdictService {
   private int ticks;
   private boolean ready, dirty, autoDispatch, restoring, contentSynced, settingsReady;
   private MerchantScreen suppressed;
-  private Set<UUID> staleIds = Set.of();
   private WorldData persistedData;
   public String error = "";
 
@@ -129,7 +129,7 @@ public final class VerdictService {
   public boolean enabled(VillagerRecord record) {
     if (!record.tradable() || !settings.professionEnabled(record.profession())) return false;
     var villager = loaded.get(record.uuid());
-    return villager == null || enabled(villager)
+    return villager != null && inRange(villager)
         && record.profession().equals(villager.getVillagerData().profession().getRegisteredName());
   }
 
@@ -139,37 +139,57 @@ public final class VerdictService {
   }
 
   public DisplayStatus displayStatus(VillagerRecord record, AnalysisResult.Verdict verdict) {
-    var status = verdict == null ? null : verdict.status();
-    if (status == AnalysisResult.Status.REDUNDANT
-        && verdict.replacements().stream().anyMatch(r -> !canConfirm(r)))
-      status = AnalysisResult.Status.REVIEW;
-    return DisplayStatus.resolve(record, status, System.currentTimeMillis(), settings.cacheMillis());
+    return DisplayStatus.resolve(record, verdict == null ? null : verdict.status());
   }
 
+  private boolean inRange(Villager v) {
+    return mc.player != null && v.level() == level && v.isAlive() && !v.isRemoved()
+        && enabled(v) && v.distanceToSqr(mc.player) <= (double) settings.radius() * settings.radius();
+  }
+
+  /** Evict active state promptly, including with automatic discovery disabled. */
   private void removeIneligibleRecords() {
-    var removed = new HashSet<UUID>();
+    boolean cacheChanged = false;
     for (var v : loaded.values()) {
-      if (!eligible(v)) {
-        var id = v.getUUID();
-        if (probe.context() != null && probe.context().uuid().equals(id)) cancel(State.CANCELLED);
-        if (records.remove(id) != null) removed.add(id);
+      var cached = tradeCache.get(v.getUUID());
+      if (v.isDeadOrDying() || !eligible(v)
+          || cached != null && cached.forProfession(v.getVillagerData().profession().getRegisteredName()) == null) {
+        cacheChanged |= tradeCache.remove(v.getUUID()) != null;
       }
     }
+    var removed = records.keySet().stream().filter(id -> {
+      var v = loaded.get(id);
+      return v == null || !inRange(v);
+    }).collect(java.util.stream.Collectors.toSet());
+    removeActive(removed);
+    if (cacheChanged) save();
+  }
+
+  private AnalysisResult without(AnalysisResult result, Set<UUID> removed) {
+    var recommended = new LinkedHashSet<>(result.recommended());
+    recommended.removeAll(removed);
+    var verdicts = new LinkedHashMap<>(result.verdicts());
+    removed.forEach(verdicts::remove);
+    return new AnalysisResult(recommended, verdicts, result.gaps());
+  }
+
+  private void removeActive(Set<UUID> removed) {
     if (removed.isEmpty()) return;
-    if (removed.contains(selected)) selected = null;
+    if (probe.context() != null && removed.contains(probe.context().uuid())) cancel(State.CANCELLED);
+    removed.forEach(records::remove);
     removed.forEach(notifications::remove);
-    nearby = nearby.stream().filter(id -> !removed.contains(id))
-        .collect(java.util.stream.Collectors.toUnmodifiableSet());
-    staleIds = staleIds.stream().filter(id -> !removed.contains(id))
-        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    if (removed.contains(selected)) selected = null;
+    nearby = Set.copyOf(records.keySet());
     var remainingMarkers = new HashMap<>(markers);
     removed.forEach(remainingMarkers::remove);
     markers = Map.copyOf(remainingMarkers);
+    // Keep published colors for remaining villagers until a fresh result is ready.
+    analysis = without(analysis, removed);
+    var remainingRegions = new LinkedHashMap<String, AnalysisResult>();
+    regional.forEach((id, result) -> remainingRegions.put(id, without(result, removed)));
+    regional = Map.copyOf(remainingRegions);
     analysisRevision++;
-    analysis = AnalysisResult.empty();
-    regional = Map.of();
     dirty = true;
-    save();
   }
 
   public void load(Entity e) {
@@ -180,11 +200,11 @@ public final class VerdictService {
   }
 
   public void unload(Entity e) {
-    if (e instanceof Villager) {
-      loaded.remove(e.getUUID());
-      if (probe.context() != null && probe.context().uuid().equals(e.getUUID()))
-        cancel(State.CANCELLED);
-      dirty = true;
+    if (e instanceof Villager v) {
+      if (v.isDeadOrDying() || !eligible(v)) tradeCache.remove(v.getUUID());
+      loaded.remove(v.getUUID());
+      removeActive(Set.of(v.getUUID()));
+      save();
     }
   }
 
@@ -241,9 +261,12 @@ public final class VerdictService {
     if (probe.running() && probe.context() == null && safeBaseline())
       for (var v :
           loaded.values().stream()
-              .sorted(Comparator.comparingDouble(v -> v.distanceToSqr(mc.player)))
+              .sorted(Comparator.<Villager>comparingLong(v -> {
+                var record = records.get(v.getUUID());
+                return record == null || record.snapshot() == null ? Long.MIN_VALUE : record.snapshot().checkedAt();
+              }).thenComparingDouble(v -> v.distanceToSqr(mc.player)))
               .toList()) {
-        if (!enabled(v)) continue;
+        if (!inRange(v)) continue;
         var r = records.get(v.getUUID());
         // Newly loaded workers must not wait for the periodic metadata scan.
         if (r == null || r.level() != v.getVillagerData().level()
@@ -251,10 +274,7 @@ public final class VerdictService {
           refreshRecord(v, System.currentTimeMillis());
           r = records.get(v.getUUID());
         }
-        if (!r.tradable()
-            || r.snapshot() != null
-                && !snapshotStale(r, System.currentTimeMillis())
-            || !probe.eligible(v.getUUID())) continue;
+        if (!r.tradable() || !probe.eligible(v.getUUID())) continue;
         Vec3 point = hitPoint(v);
         if (point == null) continue;
         if (probe.begin(generation, dimension, v.getUUID(), v.getId(), Mode.AUTOMATIC)) {
@@ -282,10 +302,12 @@ public final class VerdictService {
     else probe.resetPreservingQuarantine();
     loaded.clear();
     records.clear();
+    tradeCache.clear();
     persistedData = null;
     targets = new ArrayList<>();
     regions = new ArrayList<>();
     analysis = AnalysisResult.empty();
+    regional = Map.of();
     markers = Map.of();
     nearby = Set.of();
     notifications.clear();
@@ -316,7 +338,7 @@ public final class VerdictService {
                         return;
                       }
                       persistedData = data;
-                      data.villagers().forEach(v -> records.put(v.uuid(), v));
+                      data.cachedTrades().forEach(v -> tradeCache.put(v.uuid(), v));
                       targets = new ArrayList<>(data.targets());
                       regions = new ArrayList<>(data.regions());
                       ready = true;
@@ -338,10 +360,10 @@ public final class VerdictService {
     return store.worlds(root.resolve("worlds")).thenApply(data -> {
       var result = new LinkedHashMap<WorldIdentity, StoredWorld>();
       for (var world : data)
-        result.put(world.identity(), new StoredWorld(world.identity(), world.villagers().size(),
+        result.put(world.identity(), new StoredWorld(world.identity(), world.cachedTrades().size(),
             active != null && active.identity().equals(world.identity())));
       if (active != null)
-        result.put(active.identity(), new StoredWorld(active.identity(), active.villagers().size(), true));
+        result.put(active.identity(), new StoredWorld(active.identity(), active.cachedTrades().size(), true));
       return result.values().stream()
           .sorted(Comparator.comparing((StoredWorld w) -> !w.current())
               .thenComparing(w -> w.identity().server())
@@ -400,7 +422,7 @@ public final class VerdictService {
   }
 
   private WorldData currentWorldData() {
-    return new WorldData(2, identity, List.copyOf(records.values()), List.copyOf(targets), List.copyOf(regions));
+    return new WorldData(4, identity, List.copyOf(tradeCache.values()), List.copyOf(targets), List.copyOf(regions));
   }
 
   private void resetActiveAfterClear() {
@@ -408,8 +430,8 @@ public final class VerdictService {
     probe.resetPreservingQuarantine();
     analysisRevision++;
     records.clear();
+    tradeCache.clear();
     notifications.clear();
-    staleIds = Set.of();
     analysis = AnalysisResult.empty();
     regional = Map.of();
     markers = Map.of();
@@ -423,14 +445,12 @@ public final class VerdictService {
   }
 
   private void refreshRecord(Villager v, long now) {
+    if (!inRange(v)) return;
     var old = records.get(v.getUUID());
     var d = v.getVillagerData();
     boolean professionChanged =
         old != null && !old.profession().equals(d.profession().getRegisteredName());
-    boolean levelChanged =
-        old == null
-            || old.level() != d.level()
-            || old.snapshot() != null && old.snapshot().level() != d.level();
+    boolean levelChanged = old == null || old.level() != d.level();
     boolean metadataChanged =
         old == null
             || levelChanged
@@ -441,6 +461,14 @@ public final class VerdictService {
             || Double.compare(old.x(), v.getX()) != 0
             || Double.compare(old.y(), v.getY()) != 0
             || Double.compare(old.z(), v.getZ()) != 0;
+    var cached = tradeCache.get(v.getUUID());
+    var snapshot = old == null
+        ? cached == null ? null : cached.forProfession(d.profession().getRegisteredName())
+        : professionChanged ? null : old.snapshot();
+    if (professionChanged) {
+      tradeCache.remove(v.getUUID());
+      removeActive(Set.of(v.getUUID()));
+    }
     var current =
         new VillagerRecord(
             identity,
@@ -452,12 +480,14 @@ public final class VerdictService {
             positionChanged ? v.getY() : old.y(),
             positionChanged ? v.getZ() : old.z(),
             metadataChanged || positionChanged ? now : old.lastSeen(),
-            old == null || levelChanged || professionChanged ? null : old.snapshot(),
+            snapshot,
             old == null ? VillagerRecord.Manual.AUTO : old.manual(),
             old == null ? "" : old.note(),
             old == null ? Set.of() : old.tags());
     if (!current.equals(old)) {
       records.put(v.getUUID(), current);
+      nearby = Set.copyOf(records.keySet());
+      analysisRevision++;
       dirty = true;
     }
   }
@@ -469,7 +499,7 @@ public final class VerdictService {
     long now = System.currentTimeMillis();
     var near = new LinkedHashSet<UUID>();
     for (var v : loaded.values()) {
-      if (!enabled(v)) continue;
+      if (!inRange(v)) continue;
       if (probe.context() != null && probe.context().uuid().equals(v.getUUID()) && !validContext())
         cancel(State.CANCELLED);
       refreshRecord(v, now);
@@ -477,24 +507,9 @@ public final class VerdictService {
         near.add(v.getUUID());
     }
     nearby = Set.copyOf(near);
-    var stale =
-        records.values().stream()
-            .filter(v -> snapshotStale(v, now))
-            .map(VillagerRecord::uuid)
-            .collect(java.util.stream.Collectors.toSet());
-    if (!stale.equals(staleIds)) {
-      staleIds = Set.copyOf(stale);
-      dirty = true;
-    }
     save();
     scanNanos = System.nanoTime() - start;
     return true;
-  }
-
-  private boolean snapshotStale(VillagerRecord record, long now) {
-    var snapshot = record.snapshot();
-    return snapshot != null
-        && (snapshot.level() != record.level() || snapshot.stale(now, settings.cacheMillis()));
   }
 
   public void save() {
@@ -503,9 +518,9 @@ public final class VerdictService {
     // Empty records are safe whether this queued snapshot is written before or after the clear.
     var current =
         new WorldData(
-            2,
+            4,
             identity,
-            clearingCurrentWorld() ? List.of() : List.copyOf(records.values()),
+            clearingCurrentWorld() ? List.of() : List.copyOf(tradeCache.values()),
             List.copyOf(targets),
             List.copyOf(regions));
     if (current.equals(persistedData)) return;
@@ -515,26 +530,22 @@ public final class VerdictService {
   public void settings(Settings s) {
     boolean professionsChanged = !settings.excludedProfessions().equals(s.excludedProfessions());
     settings = s;
-    if (professionsChanged) {
-      analysisRevision++;
-      analysis = AnalysisResult.empty();
-      regional = Map.of();
-      markers = Map.of();
-      if (selected != null && records.containsKey(selected) && !enabled(records.get(selected))) selected = null;
-      if (probe.context() != null && !validContext()) cancel(State.CANCELLED);
-      scan();
-    }
+    removeIneligibleRecords();
+    if (professionsChanged) scan();
     probe.configure(s.intervalMillis(), s.timeoutMillis());
     store.save(root.resolve("settings.json"), s);
     dirty = true;
   }
 
   public void changed() {
+    analysisRevision++;
     dirty = true;
     save();
   }
 
   public void edit(VillagerRecord v) {
+    if (!records.containsKey(v.uuid()) || !enabled(v)) return;
+    if (v.snapshot() != null) tradeCache.put(v.uuid(), CachedTrade.from(v));
     records.put(v.uuid(), v);
     changed();
   }
@@ -550,16 +561,14 @@ public final class VerdictService {
     var input = records.values().stream().filter(this::enabled).toList();
     var targetCopy = List.copyOf(targets);
     var regionCopy = List.copyOf(regions);
-    var active = Set.copyOf(loaded.keySet());
     var options = settings;
-    long now = System.currentTimeMillis();
     java.util.concurrent.CompletableFuture.supplyAsync(
             () -> {
               long start = System.nanoTime();
               var optimizer = new Optimizer();
               var global =
                   optimizer.analyze(
-                      input, targetCopy, active, now, options.cacheMillis(), options.backups());
+                        input, targetCopy, options.backups());
               var perRegion = new LinkedHashMap<String, AnalysisResult>();
               for (var r : regionCopy)
                 perRegion.put(
@@ -567,9 +576,6 @@ public final class VerdictService {
                     optimizer.analyze(
                         input.stream().filter(r::contains).toList(),
                         r.targets(),
-                        active,
-                        now,
-                        options.cacheMillis(),
                         options.backups()));
               return new Computed(global, Map.copyOf(perRegion), System.nanoTime() - start);
             },
@@ -604,7 +610,7 @@ public final class VerdictService {
       cancel(State.CONFLICT);
       return;
     }
-    if (ready && !clearingCurrentWorld() && entity instanceof Villager v && enabled(v)
+    if (ready && !clearingCurrentWorld() && entity instanceof Villager v && inRange(v)
         && probe.begin(generation, identity.dimension(), v.getUUID(), v.getId(), Mode.MANUAL)) {
       // An interaction can precede the next scan, including when automatic scanning is disabled.
       refreshRecord(v, System.currentTimeMillis());
@@ -669,15 +675,7 @@ public final class VerdictService {
                 o.getUses(),
                 o.getMaxUses()));
       var snap =
-          new TradeSnapshot(
-              ts,
-              packet.getVillagerLevel(),
-              System.currentTimeMillis(),
-              packet.showProgress()
-                  ? (packet.getVillagerLevel() >= 5
-                      ? TradeSnapshot.Completeness.CURRENT
-                      : TradeSnapshot.Completeness.UNLOCKED_LEVELS_REMAIN)
-                  : TradeSnapshot.Completeness.UNKNOWN);
+          new TradeSnapshot(ts, System.currentTimeMillis());
       var old = records.get(c.uuid());
       if (old == null) {
         var v = loaded.get(c.uuid());
@@ -703,6 +701,7 @@ public final class VerdictService {
       }
       if (old != null) {
         records.put(c.uuid(), old.withSnapshot(snap));
+        tradeCache.put(c.uuid(), CachedTrade.from(old.withSnapshot(snap)));
         notifyChanges(old, snap);
         changed();
       }
@@ -729,7 +728,7 @@ public final class VerdictService {
         || !c.dimension().equals(identity.dimension())) return false;
     var v = loaded.get(c.uuid());
     var record = records.get(c.uuid());
-    return v != null && v.getId() == c.entityId() && v.isAlive() && enabled(v)
+    return v != null && v.getId() == c.entityId() && inRange(v)
         && (record == null
             || record.profession().equals(v.getVillagerData().profession().getRegisteredName()));
   }
@@ -805,16 +804,6 @@ public final class VerdictService {
     suppressed = null;
   }
 
-  public boolean canConfirm(ComparisonResult r) {
-    var v = records.get(r.replacement());
-    return r.confirmed()
-        && loaded.containsKey(r.replacement())
-        && v != null
-        && enabled(v)
-        && v.snapshot() != null
-        && !snapshotStale(v, System.currentTimeMillis());
-  }
-
   public void pause() {
     probe.pause();
     restore();
@@ -835,8 +824,7 @@ public final class VerdictService {
                 v ->
                     loaded.containsKey(v.uuid())
                         && enabled(v)
-                        && (v.snapshot() == null
-                            || snapshotStale(v, System.currentTimeMillis())))
+                        && v.snapshot() == null)
             .min(Comparator.comparingDouble(this::distanceSquared))
             .map(VillagerRecord::uuid)
             .orElse(null);
@@ -856,8 +844,7 @@ public final class VerdictService {
         if (!v.tradable()) none++;
         else if (v.uuid().equals(active)) {
         } else if (probe.failureCount(v.uuid()) > 0) failed++;
-        else if (v.snapshot() != null
-            && !snapshotStale(v, System.currentTimeMillis())) success++;
+        else if (v.snapshot() != null) success++;
         else pending++;
       }
     return Map.of(
@@ -929,8 +916,8 @@ public final class VerdictService {
       int color =
           switch (status) {
             case KEEP -> settings.green();
-            case PENDING, STALE, ANALYZING, REVIEW -> settings.yellow();
-            case REDUNDANT -> settings.red();
+            case UNSCANNED -> settings.yellow();
+            case DISCARD -> settings.red();
           };
       var lines = MarkerText.lines(record, status, settings.statusMarks(), settings.summaries())
           .stream().map(line -> (Component) line.copy().withColor(color)).toList();

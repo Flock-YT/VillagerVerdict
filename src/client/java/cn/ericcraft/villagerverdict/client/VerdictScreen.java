@@ -5,7 +5,6 @@ import cn.ericcraft.villagerverdict.analysis.TradeComparison;
 import cn.ericcraft.villagerverdict.model.AnalysisResult;
 import cn.ericcraft.villagerverdict.model.AnalysisResult.Verdict;
 import cn.ericcraft.villagerverdict.model.ComparisonResult;
-import cn.ericcraft.villagerverdict.model.DisplayStatus;
 import cn.ericcraft.villagerverdict.model.ItemData;
 import cn.ericcraft.villagerverdict.model.TargetTrade;
 import cn.ericcraft.villagerverdict.model.Trade;
@@ -34,7 +33,7 @@ public final class VerdictScreen extends WorldScreen {
         "vv.value", "vv.price", "vv.enchantment", "vv.distance", "vv.profession"
     };
     private static final String[] FILTERS = {
-        "vv.filter.all", "vv.filter.keep", "vv.filter.review", "vv.filter.redundant"
+        "vv.filter.all", "vv.filter.keep", "vv.filter.discard", "vv.filter.unscanned"
     };
     private static final String[] TABS = {
         "vv.villagers", "vv.targets", "vv.regions", "vv.settings"
@@ -48,7 +47,6 @@ public final class VerdictScreen extends WorldScreen {
     private boolean restoreSearch;
     private int searchCursor;
     private String query = "", regionId = "";
-    private boolean nearbyOnly;
     private int refresh;
     private int detailMax, lastClickY = -1, lastClickX;
     private final List<Icon> icons = new ArrayList<>();
@@ -120,10 +118,9 @@ public final class VerdictScreen extends WorldScreen {
     private void initVillagerList() {
         int y = 49;
         int available = width - 24;
-        int sw = available * 29 / 100 - 3;
-        int sow = available * 28 / 100 - 3;
-        int nw = available * 21 / 100 - 3;
-        int fw = available - sw - sow - nw - 12;
+        int sw = available * 42 / 100 - 3;
+        int sow = available * 32 / 100 - 3;
+        int fw = available - sw - sow - 8;
 
         var search = new EditBox(font, 12, y, sw, 20, Component.translatable("vv.searchHint"));
         search.setValue(query);
@@ -152,22 +149,10 @@ public final class VerdictScreen extends WorldScreen {
             });
         sortBtn.setTooltip(Tooltip.create(sortText));
 
-        Component scopeText = Component.translatable(nearbyOnly ? "vv.nearby" : "vv.all");
-        var scopeBtn = button(
-            Component.literal(font.plainSubstrByWidth(scopeText.getString(), nw - 8)),
-            12 + sw + sow + 8, y, nw,
-            () -> {
-                nearbyOnly = !nearbyOnly;
-                regionId = "";
-                offset = 0;
-                rebuildWidgets();
-            });
-        scopeBtn.setTooltip(Tooltip.create(scopeText));
-
         Component filterText = Component.translatable(FILTERS[filter]);
         var filterBtn = button(
             Component.literal(font.plainSubstrByWidth(filterText.getString(), fw - 8)),
-            12 + sw + sow + nw + 12, y, fw,
+            12 + sw + sow + 8, y, fw,
             () -> {
                 filter = (filter + 1) % FILTERS.length;
                 offset = 0;
@@ -371,12 +356,7 @@ public final class VerdictScreen extends WorldScreen {
         scanBtn.setTooltip(Tooltip.create(Component.translatable("vv.scan.help")));
 
         boolean running = s.probe.running();
-        boolean autoStartOn = s.identity() != null
-            && s.settings.autoServers().getOrDefault(s.identity().server(), false);
-
-        int probeW = autoStartOn
-            ? Math.min(136, Math.max(82, avail - scanW - 76))
-            : Math.min(156, Math.max(88, avail - scanW - 4));
+        int probeW = Math.min(156, Math.max(88, avail - scanW - 4));
         Component probeLabel = Component.translatable(running ? "vv.probeRunning" : "vv.probeStart")
             .withColor(running ? 0xFF55DD88 : 0xFFFFFFFF);
         var probeBtn = button(probeLabel, 12 + scanW + 4, y, probeW, () -> {
@@ -384,16 +364,6 @@ public final class VerdictScreen extends WorldScreen {
             rebuildWidgets();
         });
         probeBtn.setTooltip(Tooltip.create(Component.translatable("vv.probe.help")));
-
-        if (autoStartOn) {
-            int offW = Math.min(82, Math.max(58, avail - scanW - probeW - 8));
-            var offBtn = button(Component.translatable("vv.probeAutoOff"),
-                12 + scanW + probeW + 8, y, offW, () -> {
-                    s.enable(false);
-                    rebuildWidgets();
-                });
-            offBtn.setTooltip(Tooltip.create(Component.translatable("vv.probeAutoOff.help")));
-        }
 
         button(Component.translatable("gui.done"), width - doneW - 12, y, doneW, this::onClose);
     }
@@ -437,7 +407,7 @@ public final class VerdictScreen extends WorldScreen {
     }
 
     private AnalysisResult viewAnalysis() {
-        return s.regional.getOrDefault(regionId, s.analysis);
+        return regionId.isEmpty() ? s.analysis : s.regional.getOrDefault(regionId, AnalysisResult.empty());
     }
 
     private TradingHallRegion currentRegion() {
@@ -484,14 +454,12 @@ public final class VerdictScreen extends WorldScreen {
     private List<VillagerRecord> filtered() {
         var list = s.records().stream()
             .filter(s::enabled)
-            .filter(v -> !nearbyOnly || s.nearby.contains(v.uuid()))
             .filter(v -> regionId.isEmpty()
                 || s.regions.stream()
                     .filter(r -> r.id().equals(regionId))
                     .anyMatch(r -> r.contains(v)))
             .filter(v -> filter == 0
-                || viewAnalysis().verdicts().get(v.uuid()) != null
-                    && viewAnalysis().verdicts().get(v.uuid()).status().ordinal() == filter - 1)
+                || s.displayStatus(v, viewAnalysis().verdicts().get(v.uuid())).ordinal() == filter - 1)
             .filter(v -> search(v).contains(query.toLowerCase(Locale.ROOT)))
             .toList();
 
@@ -571,7 +539,7 @@ public final class VerdictScreen extends WorldScreen {
     private int color(VillagerRecord record, Verdict verdict) {
         return switch (s.displayStatus(record, verdict)) {
             case KEEP -> s.settings.green();
-            case REDUNDANT -> s.settings.red();
+            case DISCARD -> s.settings.red();
             default -> s.settings.yellow();
         };
     }
@@ -708,7 +676,7 @@ public final class VerdictScreen extends WorldScreen {
 
         // 2. Position, load status, and relative last-seen time (no raw UUID or ISO UTC!)
         String locLine = "(" + (int) v.x() + ", " + (int) v.y() + ", " + (int) v.z() + ") · "
-            + Component.translatable(s.isLoaded(v.uuid()) ? "vv.loaded" : "vv.unloaded").getString()
+            + Component.translatable("vv.loaded").getString()
             + " · " + Component.translatable(
                 "vv.lastSeen", ClientDisplayText.relativeTimeText(v.lastSeen())).getString();
         yy = drawWrappedLine(g, locLine, x + 8, yy, innerW, 0xFF9FB8D8);
@@ -735,9 +703,6 @@ public final class VerdictScreen extends WorldScreen {
 
         if (verdict != null) {
             yy = drawWrappedLine(g, reason(verdict.reason()), x + 8, yy, innerW, 0xFFE6EDF7);
-            yy = drawWrappedLine(g,
-                Component.translatable("vv.confidence." + verdict.confidence()).getString(),
-                x + 8, yy, innerW, 0xFF9FB8D8);
         }
 
         var snap = v.snapshot();
@@ -745,14 +710,9 @@ public final class VerdictScreen extends WorldScreen {
             yy = drawWrappedLine(g, Component.translatable("vv.uninspected").getString(),
                 x + 8, yy, innerW, 0xFFFFCC55);
         } else {
-            String syncText = Component.translatable("vv.complete." + snap.completeness()).getString()
-                + " · " + Component.translatable(
-                    "vv.syncedAt", ClientDisplayText.relativeTimeText(snap.checkedAt())).getString();
+            String syncText = Component.translatable(
+                "vv.syncedAt", ClientDisplayText.relativeTimeText(snap.checkedAt())).getString();
             yy = drawWrappedLine(g, syncText, x + 8, yy, innerW, 0xFF9FB8D8);
-            if (snap.stale(System.currentTimeMillis(), s.settings.cacheMillis())) {
-                yy = drawWrappedLine(g, Component.translatable("vv.stale").getString(),
-                    x + 8, yy, innerW, 0xFFFFCC55);
-            }
         }
 
         // 5. Trades with icons & plain pricing
@@ -798,10 +758,8 @@ public final class VerdictScreen extends WorldScreen {
             yy += 3;
             for (var r : verdict.replacements()) {
                 String deltaSummary = summarizePriceDelta(r);
-                String confirmText = Component.translatable(
-                    s.canConfirm(r) ? "vv.confirmed" : "vv.cached").getString();
                 String repText = Component.translatable("vv.replacement.line",
-                    (int) r.x(), (int) r.y(), (int) r.z(), deltaSummary, confirmText).getString();
+                    (int) r.x(), (int) r.y(), (int) r.z(), deltaSummary).getString();
                 int begin = yy;
                 yy = drawWrappedLine(g, repText, x + 8, yy, innerW, 0xFFB8A8FF);
                 if (lastClickY >= begin && lastClickY < yy && lastClickX >= x && lastClickX < x + w) {
@@ -850,13 +808,7 @@ public final class VerdictScreen extends WorldScreen {
             .replace("manual protection / keep", Component.translatable("vv.reason.manual").getString())
             .replace("coverage / unique value", Component.translatable("vv.reason.coverage").getString())
             .replace("all known trades have replacements", Component.translatable("vv.reason.redundant").getString())
-            .replace("stale, unavailable replacement or coverage gap", Component.translatable("vv.reason.review").getString())
-            .replace("uninspected or completeness unknown", Component.translatable("vv.reason.uninspected").getString())
-            .replace("cached trades expired", Component.translatable("vv.reason.stale").getString())
-            .replace("known trades lack retained replacements", Component.translatable("vv.reason.gap").getString())
-            .replace("replacement unloaded or expired", Component.translatable("vv.reason.unavailable").getString())
-            .replace("unknown future trades", Component.translatable("vv.reason.unknown").getString())
-            .replace("manual exclusion", Component.translatable("vv.reason.excluded").getString());
+            .replace("outside target scope", Component.translatable("vv.reason.outsideTargets").getString());
     }
 
     @Override

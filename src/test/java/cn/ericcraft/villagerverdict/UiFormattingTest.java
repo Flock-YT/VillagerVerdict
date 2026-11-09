@@ -35,11 +35,6 @@ class UiFormattingTest {
         assertThrows(IllegalArgumentException.class, () -> UiFormatting.secondsToTicks(0));
         assertThrows(IllegalArgumentException.class, () -> UiFormatting.secondsToTicks(Double.NaN));
 
-        assertEquals(30L, UiFormatting.millisToMinutes(1_800_000L));
-        assertEquals(1L, UiFormatting.millisToMinutes(100L));
-        assertEquals(1_800_000L, UiFormatting.minutesToMillis(30L));
-        assertThrows(IllegalArgumentException.class, () -> UiFormatting.minutesToMillis(0L));
-
         assertEquals(2.5, UiFormatting.millisToSeconds(2500L));
         assertEquals(3000L, UiFormatting.secondsToTimeoutMillis(3.0));
         assertThrows(IllegalArgumentException.class, () -> UiFormatting.secondsToTimeoutMillis(0.5));
@@ -65,12 +60,10 @@ class UiFormattingTest {
     }
 
     @Test
-    void normalizesLegacyManualStatesAndParsesGapStrings() {
+    void manualStatesAndGapStrings() {
         assertEquals(Manual.AUTO, UiFormatting.normalizeManualForUi(null));
         assertEquals(Manual.AUTO, UiFormatting.normalizeManualForUi(Manual.AUTO));
-        assertEquals(Manual.PROTECT, UiFormatting.normalizeManualForUi(Manual.KEEP));
-        assertEquals(Manual.PROTECT, UiFormatting.normalizeManualForUi(Manual.PROTECT));
-        assertEquals(Manual.REMOVE, UiFormatting.normalizeManualForUi(Manual.REMOVE));
+        assertEquals(Manual.KEEP, UiFormatting.normalizeManualForUi(Manual.KEEP));
 
         assertEquals(
             new UiFormatting.ParsedGap("minecraft:enchanted_book", "minecraft:mending", "0/1", false),

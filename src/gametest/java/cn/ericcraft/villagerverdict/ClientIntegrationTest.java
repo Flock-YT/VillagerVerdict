@@ -39,6 +39,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       server.runCommand("tp @p 0 -60 0");
       testShortcuts(c);
       testShortcutFeedback(c, server);
+      testContinuousThreeStates(c, server, connection);
       UUID id =
           server.computeOnServer(
               s -> {
@@ -327,7 +328,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         var s = service.settings;
         service.settings(new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(),
             s.green(), s.yellow(), s.red(), 48, s.scanTicks(), false,
-            1, 1, s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(), s.backups(),
+            1, 1, s.intervalMillis(), s.timeoutMillis(), s.backups(),
             s.notifications(), s.autoServers(), s.acknowledged(), s.dataset(), s.excludedProfessions()));
         service.scan();
         service.analysis = AnalysisResult.empty();
@@ -624,7 +625,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     var original = c.computeOnClient(mc -> {
       var service = VerdictService.INSTANCE;
       service.selected = service.records().iterator().next().uuid();
-      return new WorldData(2, service.identity(), List.copyOf(service.records()),
+      return new WorldData(4, service.identity(), service.records().stream().filter(v -> v.snapshot() != null).map(CachedTrade::from).toList(),
           List.copyOf(service.targets), List.copyOf(service.regions));
     });
     var sibling = withIdentity(original,
@@ -668,7 +669,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     try (var store = new JsonStore(e -> { throw new AssertionError(e); })) {
       var worlds = store.worlds(directory).join();
       if (worlds.stream().filter(w -> w.identity().equals(original.identity()))
-          .anyMatch(w -> !w.villagers().isEmpty())) throw new AssertionError("clear not durable");
+          .anyMatch(w -> !w.cachedTrades().isEmpty())) throw new AssertionError("clear not durable");
       if (!worlds.contains(sibling) || !worlds.contains(other))
         throw new AssertionError("world clear leaked to a sibling or other server");
     }
@@ -688,7 +689,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     try (var store = new JsonStore(e -> { throw new AssertionError(e); })) {
       var worlds = store.worlds(directory).join();
       if (worlds.stream().filter(w -> w.identity().server().equals(original.identity().server()))
-          .anyMatch(w -> !w.villagers().isEmpty())) throw new AssertionError("server clear incomplete");
+          .anyMatch(w -> !w.cachedTrades().isEmpty())) throw new AssertionError("server clear incomplete");
       if (!worlds.contains(other) || !worlds.contains(sibling.clearVillagers()))
         throw new AssertionError("server clear lost another server or sibling configuration");
     }
@@ -708,7 +709,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     try (var store = new JsonStore(e -> { throw new AssertionError(e); })) {
       if (store.worlds(directory).join().stream()
           .filter(w -> w.identity().equals(original.identity()))
-          .noneMatch(w -> w.targets().contains(extraTarget) && w.villagers().isEmpty()))
+          .noneMatch(w -> w.targets().contains(extraTarget) && w.cachedTrades().isEmpty()))
         throw new AssertionError("clear lost configuration edited while it was in progress");
     }
     c.runOnClient(mc -> mc.gui.setScreen(null));
@@ -774,10 +775,11 @@ public class ClientIntegrationTest implements FabricClientGameTest {
   private WorldData testClearWhileLeaving(ClientGameTestContext c, String transition, Runnable leave) {
     var expected = c.computeOnClient(mc -> {
       var service = VerdictService.INSTANCE;
-      // Seed an unloaded record so any stale write after the clear is observable.
-      service.edit(new VillagerRecord(service.identity(), UUID.randomUUID(), "minecraft:librarian",
-          5, false, 0, -60, 0, System.currentTimeMillis(), null,
-          VillagerRecord.Manual.AUTO, "", Set.of()));
+      // An inactive cache must never be resurrected by a stale save after clearing.
+      @SuppressWarnings("unchecked")
+      var cache = (Map<UUID, CachedTrade>) privateField(service, "tradeCache");
+      var id = UUID.randomUUID();
+      cache.put(id, new CachedTrade(id, "minecraft:librarian", new TradeSnapshot(List.of(), 1)));
       var target = new TargetTrade("clear-" + transition, "minecraft:book", "", 1, 0, 1);
       var region = new TradingHallRegion("clear-" + transition, transition, service.identity().dimension(),
           0, 0, 0, 10, 10, 10, List.of(target), 0xFF55DD88);
@@ -785,7 +787,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var regions = new ArrayList<>(service.regions);
       targets.add(target);
       regions.add(region);
-      return new WorldData(2, service.identity(), List.of(), targets, regions);
+      return new WorldData(4, service.identity(), List.of(), targets, regions);
     });
     CompletableFuture<Integer> clearing;
     try (var barrier = holdWorldStore(c)) {
@@ -824,6 +826,12 @@ public class ClientIntegrationTest implements FabricClientGameTest {
           || !expected.regions().equals(service.regions) || !service.records().isEmpty())
         throw new AssertionError("cleared world did not reload its edited configuration");
     });
+  }
+
+  private static CachedTrade cachedTrade(VerdictService service, UUID id) {
+    @SuppressWarnings("unchecked")
+    var cache = (Map<UUID, CachedTrade>) privateField(service, "tradeCache");
+    return cache.get(id);
   }
 
   private static Object privateField(Object instance, String name) {
@@ -933,6 +941,160 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       VillagerverdictClient.resetShortcuts();
     });
     System.out.println("VV_SHORTCUT_FEEDBACK_PASS real keys, action bar, scan, target, consent, pause, capture, quiet background");
+  }
+
+  private void testContinuousThreeStates(ClientGameTestContext c, TestServerContext server,
+      TestServerConnection connection) {
+    var original = c.computeOnClient(mc -> VerdictService.INSTANCE.settings);
+    var ids = server.computeOnServer(s -> {
+      var result = new ArrayList<UUID>();
+      var registry = s.overworld().registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+      for (int i = 0; i < 3; i++) {
+        var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+        v.setNoAi(true);
+        setProfession(v, VillagerProfession.LIBRARIAN);
+        v.setPos(i == 2 ? 15 : i + 1, -60, 0);
+        var book = new ItemStack(Items.ENCHANTED_BOOK);
+        net.minecraft.world.item.enchantment.EnchantmentHelper.updateEnchantments(book,
+            ench -> ench.set(registry.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.SHARPNESS),
+                v.getX() == 1 ? 1 : 3));
+        var offers = new MerchantOffers();
+        offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 5), book, 12, 1, 0));
+        v.setOffers(offers);
+        s.overworld().addFreshEntity(v);
+        result.add(v.getUUID());
+      }
+      return result;
+    });
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) != null));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.scan();
+      if (ids.stream().anyMatch(id -> service.displayStatus(service.record(id), null) != DisplayStatus.UNSCANNED))
+        throw new AssertionError("new workers were not unscanned");
+      mc.gui.setScreen(new VerdictScreen());
+    });
+    clickButtonContaining(c, net.minecraft.network.chat.Component.translatable("vv.probeStart").getString());
+    c.waitForScreen(WorldConfirmScreen.class);
+    c.clickScreenButton("gui.yes");
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (!service.probe.running() || !service.settings.autoServers().getOrDefault(service.identity().server(), false))
+        throw new AssertionError("starting from menu did not remember auto-start");
+      mc.gui.setScreen(null);
+    });
+    c.waitFor(mc -> ids.subList(0, 2).stream().allMatch(id -> VerdictService.INSTANCE.record(id).snapshot() != null), 400);
+    c.waitFor(mc -> VerdictService.INSTANCE.probe.context() == null);
+    c.waitFor(mc -> VerdictService.INSTANCE.analysis.verdicts().size() == 2);
+    long firstRead = c.computeOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (service.displayStatus(service.record(ids.get(0)), service.analysis.verdicts().get(ids.get(0))) != DisplayStatus.DISCARD
+          || service.displayStatus(service.record(ids.get(1)), service.analysis.verdicts().get(ids.get(1))) != DisplayStatus.KEEP
+          || service.displayStatus(service.record(ids.get(2)), null) != DisplayStatus.UNSCANNED)
+        throw new AssertionError("initial three-state decision incorrect");
+      return service.record(ids.get(0)).snapshot().checkedAt();
+    });
+    c.setScreen(VerdictScreen::new);
+    for (String filter : List.of("vv.filter.all", "vv.filter.keep", "vv.filter.discard")) {
+      c.clickScreenButton(filter);
+      c.runOnClient(mc -> {
+        long rows = mc.gui.screen().children().stream()
+            .filter(child -> child instanceof net.minecraft.client.gui.components.Button button
+                && button.getMessage().getString().contains("Lv.")).count();
+        if (rows != 1) throw new AssertionError("three-state filter does not match rows: " + rows);
+      });
+    }
+    c.takeScreenshot("three-states-unscanned-filter");
+    testSettingsAndNarrowColors(c);
+    c.runOnClient(mc -> mc.gui.setScreen(null));
+    server.runOnServer(s -> {
+      var v = (Villager) s.overworld().getEntity(ids.get(0));
+      v.setVillagerData(v.getVillagerData().withLevel(2));
+      var book = new ItemStack(Items.ENCHANTED_BOOK);
+      var registry = s.overworld().registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+      net.minecraft.world.item.enchantment.EnchantmentHelper.updateEnchantments(book,
+          ench -> ench.set(registry.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.SHARPNESS), 5));
+      v.getOffers().add(new MerchantOffer(new ItemCost(Items.EMERALD, 5), book, 12, 1, 0));
+    });
+    connection.waitForClientboundPackets();
+    c.runOnClient(mc -> {
+      VerdictService.INSTANCE.scan();
+      if (VerdictService.INSTANCE.record(ids.get(0)).snapshot() == null)
+        throw new AssertionError("level change cleared successful scan");
+      VerdictService.INSTANCE.enable(true);
+    });
+    c.waitFor(mc -> VerdictService.INSTANCE.record(ids.get(0)).snapshot().checkedAt() > firstRead
+        && VerdictService.INSTANCE.analysis.verdicts().get(ids.get(0)).status() == AnalysisResult.Status.KEEP
+        && VerdictService.INSTANCE.markers.get(ids.get(0)).color() == VerdictService.INSTANCE.settings.green(), 900);
+    c.waitFor(mc -> VerdictService.INSTANCE.probe.context() == null);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (service.record(ids.get(0)).snapshot().trades().size() != 2
+          || service.markers.get(ids.get(0)).color() != service.settings.green())
+        throw new AssertionError("continuous scan did not update red worker to green: "
+            + service.record(ids.get(0)).snapshot() + " marker=" + service.markers.get(ids.get(0)));
+      mc.gui.setScreen(new VerdictScreen());
+    });
+    clickButtonContaining(c, net.minecraft.network.chat.Component.translatable("vv.probeRunning").getString());
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (service.probe.running() || service.settings.autoServers().getOrDefault(service.identity().server(), false))
+        throw new AssertionError("pause from menu left auto-start enabled");
+      service.settings(original);
+      mc.gui.setScreen(null);
+    });
+    server.runOnServer(s -> ids.forEach(id -> s.overworld().getEntity(id).discard()));
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) == null));
+    // Isolate these fixtures from the rest of the suite.
+    c.runOnClient(mc -> {
+      @SuppressWarnings("unchecked")
+      var records = (Map<UUID, VillagerRecord>) privateField(VerdictService.INSTANCE, "records");
+      ids.forEach(records::remove);
+      VerdictService.INSTANCE.probe.reset();
+      VerdictService.INSTANCE.changed();
+    });
+    System.out.println("VV_THREE_STATES_PASS continuous reads, cooldown, level change, red-to-green, filters, unified auto-start");
+  }
+
+  private void testSettingsAndNarrowColors(ClientGameTestContext c) {
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.enable(false);
+      var previous = service.settings;
+      var autos = new HashMap<>(previous.autoServers());
+      autos.put("other-test-server", true);
+      var acknowledged = new HashSet<>(previous.acknowledged());
+      acknowledged.add("other-test-server");
+      service.settings(new Settings(previous.version(), previous.markers(), previous.statusMarks(), previous.summaries(),
+          previous.green(), previous.yellow(), previous.red(), previous.radius(), previous.scanTicks(), previous.autoScan(),
+          7, 11, previous.intervalMillis(), previous.timeoutMillis(), previous.backups(), previous.notifications(),
+          autos, acknowledged, previous.dataset(), previous.excludedProfessions()));
+      service.probe.run();
+      SettingsScreen.open(new VerdictScreen());
+    });
+    c.clickScreenButton("vv.save");
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (!service.probe.running() || service.settings.autoServers().getOrDefault(service.identity().server(), false))
+        throw new AssertionError("saving unrelated settings stopped manual probe or enabled auto-start");
+      SettingsScreen.open(null);
+      mc.gui.screen().resize(320, 240);
+      var screen = mc.gui.screen();
+      for (var child : screen.children()) {
+        if (child instanceof net.minecraft.client.gui.components.AbstractWidget widget
+            && (widget.getX() < 0 || widget.getX() + widget.getWidth() > 320))
+          throw new AssertionError("settings control overflows narrow window");
+      }
+    });
+    c.takeScreenshot("narrow-settings-colors");
+    c.clickScreenButton("vv.settings.tab.tools");
+    c.clickScreenButton("vv.settings.resetDefaults");
+    c.clickScreenButton("vv.save");
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (!service.settings.equals(Settings.defaults()) || service.probe.running())
+        throw new AssertionError("reset did not restore every setting or stop auto-read");
+    });
   }
 
   private void assertTransparent(net.minecraft.client.Minecraft mc) {
@@ -1046,7 +1208,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var s = service.settings;
       service.settings(new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(),
           s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), false,
-          s.markerLimit(), s.textRange(), s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(),
+          s.markerLimit(), s.textRange(), s.intervalMillis(), s.timeoutMillis(),
           s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), s.dataset(), s.excludedProfessions()));
     });
     UUID worker = server.computeOnServer(s -> {
@@ -1063,7 +1225,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var service = VerdictService.INSTANCE;
       service.scan();
       service.edit(service.record(worker).withSnapshot(service.record(source).snapshot())
-          .withManual(VillagerRecord.Manual.PROTECT, "retain note", Set.of("retain-tag")));
+          .withManual(VillagerRecord.Manual.KEEP, "retain note", Set.of("retain-tag")));
     });
     server.runOnServer(s -> {
       var v = (Villager) s.overworld().getEntity(worker);
@@ -1075,6 +1237,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     });
     c.waitFor(mc -> ((Villager) mc.level.getEntity(worker)).getVillagerData()
         .profession().is(VillagerProfession.FARMER));
+    c.waitFor(mc -> VerdictService.INSTANCE.probe.eligible(worker));
     c.runOnClient(mc -> {
       var service = VerdictService.INSTANCE;
       if (!service.record(worker).profession().equals("minecraft:librarian")
@@ -1093,7 +1256,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.runOnClient(mc -> {
       var r = VerdictService.INSTANCE.record(worker);
       if (!r.snapshot().trades().getFirst().output().item().equals("minecraft:wheat")
-          || r.manual() != VillagerRecord.Manual.PROTECT || !r.note().equals("retain note")
+          || r.manual() != VillagerRecord.Manual.KEEP || !r.note().equals("retain note")
           || !r.tags().equals(Set.of("retain-tag")))
         throw new AssertionError("manual capture lost new offers or existing annotations");
       mc.player.closeContainer();
@@ -1146,7 +1309,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       if (service.probe.context() != null || service.selected != null
           || service.markers.containsKey(armorer) || service.nearby.contains(armorer))
         throw new AssertionError("disabled profession retained live state");
-      if (!snapshot.equals(service.record(armorer).snapshot()))
+      if (service.record(armorer) != null || !snapshot.equals(cachedTrade(service, armorer).snapshot()))
         throw new AssertionError("profession filter deleted cached trades");
       service.manual(mc.level.getEntity(armorer));
       if (service.probe.context() != null) throw new AssertionError("disabled manual capture started");
@@ -1189,21 +1352,16 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var service = VerdictService.INSTANCE;
       if (service.stats().values().stream().anyMatch(count -> count != 0L))
         throw new AssertionError("all-disabled professions counted in stats");
-      if (!snapshot.equals(service.record(armorer).snapshot()))
+      if (service.record(armorer) != null || !snapshot.equals(cachedTrade(service, armorer).snapshot()))
         throw new AssertionError("all-disabled professions lost cache");
-      var stale = new TradeSnapshot(snapshot.trades(), snapshot.level(),
-          System.currentTimeMillis() - original.cacheMillis() - 1000, snapshot.completeness());
-      service.edit(service.record(armorer).withSnapshot(stale));
       service.probe.run();
     });
     c.waitTicks(30);
     c.runOnClient(mc -> {
       var service = VerdictService.INSTANCE;
-      if (service.probe.context() != null || !service.record(armorer).snapshot()
-          .stale(System.currentTimeMillis(), original.cacheMillis()))
+      if (service.probe.context() != null || service.record(armorer) != null || !snapshot.equals(cachedTrade(service, armorer).snapshot()))
         throw new AssertionError("disabled worker was automatically probed");
       service.pause();
-      service.edit(service.record(armorer).withSnapshot(snapshot));
       service.settings(original);
     });
     c.waitFor(mc -> VerdictService.INSTANCE.analysis.verdicts().containsKey(armorer)
@@ -1217,7 +1375,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
 
   private Settings markerSettings(Settings s, boolean markers, boolean status, boolean summary) {
     return new Settings(s.version(), markers, status, summary, s.green(), s.yellow(), s.red(),
-        s.radius(), s.scanTicks(), s.autoScan(), s.markerLimit(), s.textRange(), s.cacheMillis(),
+        s.radius(), s.scanTicks(), s.autoScan(), s.markerLimit(), s.textRange(),
         s.intervalMillis(), s.timeoutMillis(), s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), s.dataset(), s.excludedProfessions());
   }
 
@@ -1265,8 +1423,8 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     testProfessionFilter(c, librarian, armorer);
     c.runOnClient(mc -> {
       var service = VerdictService.INSTANCE;
-      service.edit(service.record(librarian).withManual(VillagerRecord.Manual.PROTECT, "", Set.of()));
-      service.edit(service.record(armorer).withManual(VillagerRecord.Manual.PROTECT, "", Set.of()));
+      service.edit(service.record(librarian).withManual(VillagerRecord.Manual.KEEP, "", Set.of()));
+      service.edit(service.record(armorer).withManual(VillagerRecord.Manual.KEEP, "", Set.of()));
     });
     c.waitFor(mc -> VerdictService.INSTANCE.markers.containsKey(librarian)
         && VerdictService.INSTANCE.markers.get(librarian).lines().getFirst().getString().equals("保留")
@@ -1289,9 +1447,8 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       if (labelText(mc.getEntityRenderDispatcher().getRenderer(mc.level.getEntity(uninspected))
           .createRenderState(mc.level.getEntity(uninspected), 0)).size() != 2)
         throw new AssertionError("uninspected trades were invented");
-      var noGoods = service.record(armorer).withSnapshot(new TradeSnapshot(List.of(), 1,
-          System.currentTimeMillis(), TradeSnapshot.Completeness.CURRENT));
-      if (MarkerText.lines(noGoods, AnalysisResult.Status.REVIEW, true, true).size() != 2)
+      var noGoods = service.record(armorer).withSnapshot(new TradeSnapshot(List.of(), System.currentTimeMillis()));
+      if (MarkerText.lines(noGoods, AnalysisResult.Status.DISCARD, true, true).size() != 2)
         throw new AssertionError("empty signature goods invented lines");
       for (boolean markers : new boolean[] {false, true})
         for (boolean status : new boolean[] {false, true})
@@ -1349,7 +1506,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       service.scan();
       for (var id : crowd)
         service.edit(service.record(id).withSnapshot(service.record(librarian).snapshot())
-            .withManual(VillagerRecord.Manual.PROTECT, "layout fixture", Set.of()));
+            .withManual(VillagerRecord.Manual.KEEP, "layout fixture", Set.of()));
     });
     c.waitFor(mc -> crowd.stream().allMatch(id -> VerdictService.INSTANCE.markers.get(id) != null
         && VerdictService.INSTANCE.markers.get(id).lines().size() == 5
@@ -1387,7 +1544,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var s = service.settings;
       service.settings(new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(),
           s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), false, s.markerLimit(),
-          s.textRange(), s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(), s.backups(),
+          s.textRange(), s.intervalMillis(), s.timeoutMillis(), s.backups(),
           s.notifications(), s.autoServers(), s.acknowledged(), s.dataset(), s.excludedProfessions()));
     });
     server.runOnServer(s -> setProfession((Villager) s.overworld().getEntity(librarian), VillagerProfession.FARMER));
@@ -1564,7 +1721,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     var directory = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir()
         .resolve("villagerverdict/worlds");
     try (var store = new JsonStore(e -> { throw new AssertionError(e); })) {
-      if (store.worlds(directory).join().stream().flatMap(w -> w.villagers().stream())
+      if (store.worlds(directory).join().stream().flatMap(w -> w.cachedTrades().stream())
           .anyMatch(v -> ids.contains(v.uuid())))
         throw new AssertionError("ineligible villagers persisted to disk");
     }
@@ -1597,7 +1754,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var s = original;
       VerdictService.INSTANCE.settings(new Settings(s.version(), s.markers(), s.statusMarks(),
           s.summaries(), s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), false,
-          s.markerLimit(), s.textRange(), s.cacheMillis(), 100, s.timeoutMillis(), s.backups(),
+          s.markerLimit(), s.textRange(), 100, s.timeoutMillis(), s.backups(),
           s.notifications(), s.autoServers(), s.acknowledged(), s.dataset(), s.excludedProfessions()));
       VerdictService.INSTANCE.probe.reset();
     });
@@ -1662,7 +1819,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
 
   private Settings withDataset(Settings s, String dataset) {
     return new Settings(s.version(), s.markers(), s.statusMarks(), s.summaries(), s.green(), s.yellow(), s.red(), s.radius(), s.scanTicks(), s.autoScan(),
-        s.markerLimit(), s.textRange(), s.cacheMillis(), s.intervalMillis(), s.timeoutMillis(),
+        s.markerLimit(), s.textRange(), s.intervalMillis(), s.timeoutMillis(),
         s.backups(), s.notifications(), s.autoServers(), s.acknowledged(), dataset, s.excludedProfessions());
   }
 
@@ -1753,9 +1910,6 @@ public class ClientIntegrationTest implements FabricClientGameTest {
   }
 
   private WorldData withIdentity(WorldData source, WorldIdentity identity) {
-    return new WorldData(2, identity, source.villagers().stream().map(v ->
-        new VillagerRecord(identity, v.uuid(), v.profession(), v.level(), v.baby(), v.x(), v.y(), v.z(),
-            v.lastSeen(), v.snapshot(), v.manual(), v.note(), v.tags())).toList(),
-        source.targets(), source.regions());
+    return new WorldData(4, identity, source.cachedTrades(), source.targets(), source.regions());
   }
 }

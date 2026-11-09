@@ -1,8 +1,8 @@
 package cn.ericcraft.villagerverdict.model;
 
-/** Presentation state keeps scan freshness separate from a review verdict. */
+/** The three user-facing states for a villager. */
 public enum DisplayStatus {
-    KEEP("+"), REVIEW("?"), REDUNDANT("−"), PENDING("?"), STALE("?"), ANALYZING("?");
+    KEEP("+"), DISCARD("−"), UNSCANNED("?");
 
     private final String symbol;
 
@@ -18,10 +18,9 @@ public enum DisplayStatus {
         return "vv.status." + name().toLowerCase(java.util.Locale.ROOT);
     }
 
-    public static DisplayStatus resolve(VillagerRecord record, AnalysisResult.Status verdict, long now, long ttl) {
+    public static DisplayStatus resolve(VillagerRecord record, AnalysisResult.Status verdict) {
+        if (record.snapshot() == null) return UNSCANNED;
         if (record.fixed()) return KEEP;
-        if (record.snapshot() == null) return PENDING;
-        if (record.snapshot().level() != record.level() || record.snapshot().stale(now, ttl)) return STALE;
-        return verdict == null ? ANALYZING : valueOf(verdict.name());
+        return verdict == null ? UNSCANNED : valueOf(verdict.name());
     }
 }
