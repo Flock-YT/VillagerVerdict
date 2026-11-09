@@ -102,6 +102,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       connection.waitForClientboundPackets();
       c.waitFor(mc -> mc.player.getMainHandItem().isEmpty() && mc.player.getOffhandItem().isEmpty());
       System.out.println("VV_FRESH_AUTO_PROBE_PASS captured with both hands occupied before any manual interaction");
+      testEntityUnloadCleanup(c, server, id);
       c.runOnClient(
           mc -> {
             if (VerdictService.INSTANCE.record(id).snapshot() != null)
@@ -418,6 +419,46 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     });
     System.out.println("VV_MENU_BACKGROUND_PASS no-world native background retained");
     System.out.println("VV_CLEAR_TRANSITIONS_PASS dataset, dimension, disconnect, reload, configuration, empty records");
+  }
+
+  private void testEntityUnloadCleanup(ClientGameTestContext c, TestServerContext server, UUID id) {
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      var villager = (Villager) mc.level.getEntity(id);
+      if (villager == null || service.record(id) == null)
+        throw new AssertionError("unload cleanup fixture is not active");
+      @SuppressWarnings("unchecked")
+      var cache = (Map<UUID, CachedTrade>) privateField(service, "tradeCache");
+      if (!cache.containsKey(id)) throw new AssertionError("trade cache missing before unload");
+
+      service.selected = null;
+      service.unload(villager);
+      if (service.selected != null || service.record(id) != null)
+        throw new AssertionError("unload with no selection left active state");
+      if (!cache.containsKey(id)) throw new AssertionError("ordinary unload discarded trade cache");
+
+      service.load(villager);
+      service.scan();
+      var otherSelection = UUID.randomUUID();
+      service.selected = otherSelection;
+      service.unload(villager);
+      if (!otherSelection.equals(service.selected))
+        throw new AssertionError("unloading another villager cleared selection");
+
+      service.load(villager);
+      service.scan();
+      service.selected = id;
+      service.unload(villager);
+      if (service.selected != null) throw new AssertionError("unloading selected villager kept selection");
+      service.load(villager);
+      service.scan();
+    });
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      var record = service.record(id);
+      service.edit(record.withSnapshot(null));
+    });
+    System.out.println("VV_UNLOAD_CLEANUP_PASS null selection, unrelated selection, selected unload, cache retention");
   }
 
   private void testShortcuts(ClientGameTestContext c) {

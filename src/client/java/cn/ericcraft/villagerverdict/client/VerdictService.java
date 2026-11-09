@@ -178,7 +178,9 @@ public final class VerdictService {
     if (probe.context() != null && removed.contains(probe.context().uuid())) cancel(State.CANCELLED);
     removed.forEach(records::remove);
     removed.forEach(notifications::remove);
-    if (removed.contains(selected)) selected = null;
+    // ImmutableCollections.Set12 rejects null in contains(); selection is optional during
+    // entity unloads and level teardown.
+    if (selected != null && removed.contains(selected)) selected = null;
     nearby = Set.copyOf(records.keySet());
     var remainingMarkers = new HashMap<>(markers);
     removed.forEach(remainingMarkers::remove);
