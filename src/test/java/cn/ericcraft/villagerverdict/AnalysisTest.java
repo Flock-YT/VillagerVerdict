@@ -16,7 +16,11 @@ class AnalysisTest {
   }
 
   static ItemData book(int level) {
-    return new ItemData("book", 1, "{}", "{}", Map.of("sharpness", level), "book");
+    return enchantedBook("minecraft:sharpness", level);
+  }
+
+  static ItemData enchantedBook(String enchantment, int level) {
+    return new ItemData("minecraft:enchanted_book", 1, "{}", "{}", Map.of(enchantment, level), "enchanted_book");
   }
 
   static Trade trade(int price, ItemData output) {
@@ -41,19 +45,19 @@ class AnalysisTest {
   }
 
   static AnalysisResult analyze(
-      List<VillagerRecord> records, List<TargetTrade> targets, int backups) {
+      List<VillagerRecord> records, int backups) {
     return new Optimizer()
-        .analyze(records, targets, backups);
+        .analyze(records, backups);
   }
 
   @Test
   void betterTradeChangesDiscardToKeepOnRescan() {
     var best = v(1, trade(5, book(3)));
     var worker = v(2, trade(10, book(1)));
-    var before = analyze(List.of(best, worker), List.of(), 1);
+    var before = analyze(List.of(best, worker), 1);
     assertEquals(AnalysisResult.Status.DISCARD, before.verdicts().get(worker.uuid()).status());
     worker = worker.withSnapshot(new TradeSnapshot(List.of(trade(10, book(1)), trade(20, book(5))), 200));
-    var after = analyze(List.of(best, worker), List.of(), 1);
+    var after = analyze(List.of(best, worker), 1);
     assertEquals(AnalysisResult.Status.KEEP, after.verdicts().get(worker.uuid()).status());
     assertEquals(AnalysisResult.Status.DISCARD, after.verdicts().get(best.uuid()).status());
   }
@@ -62,7 +66,7 @@ class AnalysisTest {
   void successfulEmptyReadCountsAsScannedDiscard() {
     var worker = v(1);
     assertEquals(AnalysisResult.Status.DISCARD,
-        analyze(List.of(worker), List.of(), 1).verdicts().get(worker.uuid()).status());
+        analyze(List.of(worker), 1).verdicts().get(worker.uuid()).status());
   }
 
   @Test
@@ -121,30 +125,30 @@ class AnalysisTest {
 
   @Test
   void stockDoesNotEraseLongTermValue() {
-    var t = new Trade(item("emerald", 1), item("emerald", 1), null, item("apple", 1), 10, 10);
+    var t = new Trade(item("emerald", 1), item("emerald", 1), null, book(5), 10, 10);
     assertTrue(t.soldOut());
-    assertEquals(Set.of(v(1, t).uuid()), analyze(List.of(v(1, t)), List.of(), 1).recommended());
+    assertEquals(Set.of(v(1, t).uuid()), analyze(List.of(v(1, t)), 1).recommended());
   }
 
   @Test
   void crossTradeCoverage() {
-    var a = v(1, trade(1, item("a", 1)), trade(1, item("b", 1)));
-    var b = v(2, trade(1, item("a", 1)));
-    var c = v(3, trade(1, item("b", 1)));
-    assertEquals(Set.of(a.uuid()), analyze(List.of(a, b, c), List.of(), 1).recommended());
+    var a = v(1, trade(1, enchantedBook("minecraft:mending", 1)), trade(1, enchantedBook("minecraft:multishot", 1)));
+    var b = v(2, trade(1, enchantedBook("minecraft:mending", 1)));
+    var c = v(3, trade(1, enchantedBook("minecraft:multishot", 1)));
+    assertEquals(Set.of(a.uuid()), analyze(List.of(a, b, c), 1).recommended());
   }
 
   @Test
   void backupsCountDistinctVillagers() {
     var a = v(1, trade(1, book(5)));
     var b = v(2, trade(1, book(5)));
-    assertEquals(2, analyze(List.of(a, b), List.of(), 2).recommended().size());
+    assertEquals(2, analyze(List.of(a, b), 2).recommended().size());
   }
 
   @Test
   void duplicateOffersDoNotCreateBackups() {
     var a = v(1, trade(1, book(5)), trade(1, book(5)));
-    var r = analyze(List.of(a), List.of(), 2);
+    var r = analyze(List.of(a), 2);
     assertEquals(1, r.recommended().size());
     assertFalse(r.gaps().isEmpty());
   }
@@ -154,26 +158,17 @@ class AnalysisTest {
     var a = v(1, trade(10, book(4)));
     a = a.withManual(VillagerRecord.Manual.KEEP, "", Set.of());
     var b = v(2, trade(20, book(5)));
-    assertEquals(2, analyze(List.of(a, b), List.of(), 1).recommended().size());
+    assertEquals(2, analyze(List.of(a, b), 1).recommended().size());
   }
 
   @Test
-  void highestLevelAboveCapStillRetained() {
+  void queryPriceCapNeverChangesHighestLevelRetention() {
     var a = v(1, trade(1, book(4)));
     var b = v(2, trade(64, book(5)));
-    var target = new TargetTrade("s", "book", "sharpness", 1, 10, 1);
-    var r = analyze(List.of(a, b), List.of(target), 1);
-    assertEquals(Set.of(b.uuid()), r.recommended());
-    assertTrue(r.gaps().stream().anyMatch(g -> g.contains("price")));
-  }
-
-  @Test
-  void targetOnlyExcludesUnrelatedCoverage() {
-    var a = v(1, trade(1, book(5)));
-    var b = v(2, trade(1, item("apple", 1)));
-    var r = analyze(List.of(a, b), List.of(new TargetTrade("s", "book", "sharpness", 1, 0, 1)), 1);
-    assertEquals(Set.of(a.uuid()), r.recommended());
-    assertEquals(AnalysisResult.Status.DISCARD, r.verdicts().get(b.uuid()).status());
+    var query = new TargetTrade("s", "minecraft:enchanted_book", "minecraft:sharpness", 1, 10);
+    assertFalse(query.matches(b));
+    assertTrue(query.matches(a));
+    assertEquals(Set.of(b.uuid()), analyze(List.of(a, b), 1).recommended());
   }
 
   @Test
@@ -193,7 +188,7 @@ class AnalysisTest {
             VillagerRecord.Manual.AUTO,
             "",
             Set.of());
-    assertFalse(analyze(List.of(a), List.of(), 1).verdicts().containsKey(a.uuid()));
+    assertFalse(analyze(List.of(a), 1).verdicts().containsKey(a.uuid()));
   }
 
 
@@ -202,7 +197,7 @@ class AnalysisTest {
   void explanationContainsUUIDAndDifferences() {
     var a = v(1, trade(2, book(5)));
     var b = v(2, trade(10, book(5)));
-    var r = analyze(List.of(a, b), List.of(), 1).verdicts().get(b.uuid()).replacements().getFirst();
+    var r = analyze(List.of(a, b), 1).verdicts().get(b.uuid()).replacements().getFirst();
     assertEquals(a.uuid(), r.replacement());
     assertEquals(-8, r.baseDifference().values().iterator().next());
   }
@@ -211,7 +206,7 @@ class AnalysisTest {
   void deterministicAcrossInputOrder() {
     var a = v(1, trade(2, book(5)));
     var b = v(2, trade(2, book(5)));
-    assertEquals(analyze(List.of(a, b), List.of(), 1), analyze(List.of(b, a), List.of(), 1));
+    assertEquals(analyze(List.of(a, b), 1), analyze(List.of(b, a), 1));
   }
 
   @Test
@@ -230,7 +225,7 @@ class AnalysisTest {
   @Test
   void manuallyKeptRecordOverridesRecommendations() {
     var a = v(1, trade(1, book(5))).withManual(VillagerRecord.Manual.KEEP, "", Set.of());
-    var r = analyze(List.of(a), List.of(), 1);
+    var r = analyze(List.of(a), 1);
     assertEquals(AnalysisResult.Status.KEEP, r.verdicts().get(a.uuid()).status());
   }
 }

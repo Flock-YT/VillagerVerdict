@@ -17,7 +17,7 @@ class WorldStorageTest {
         var original = AnalysisTest.v(1, AnalysisTest.trade(5, AnalysisTest.book(4)));
         var record = new VillagerRecord(identity, original.uuid(), original.profession(), original.level(),
             false, 0, 0, 0, 1, original.snapshot(), VillagerRecord.Manual.KEEP, "note", Set.of("tag"));
-        var target = new TargetTrade("t", "minecraft:book", "", 1, 0, 1);
+        var target = new TargetTrade("t", "minecraft:book", "", 1, 0);
         var region = new TradingHallRegion("r", "Hall", dimension, 0, 0, 0, 5, 5, 5,
             List.of(target), 0xFF99AAFF);
         return new WorldData(4, identity, List.of(CachedTrade.from(record)), List.of(target), List.of(region));

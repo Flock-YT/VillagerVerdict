@@ -74,6 +74,11 @@ public final class VerdictService {
   public UUID selected;
   /** The villager currently shown by the single-target navigation mode, if any. */
   public UUID navigationTarget;
+  private UUID replacementSource;
+  private Set<UUID> replacementTargets = Set.of();
+  private ManualTradeSession manualTrade;
+
+  private record ManualTradeSession(long generation, UUID villager, int container, boolean offersReceived) {}
   public long scanNanos, analysisNanos, markerNanos;
 
   public long writeNanos() {
@@ -182,6 +187,9 @@ public final class VerdictService {
     removed.forEach(notifications::remove);
     // ImmutableCollections.Set12 rejects null in contains(); selection is optional during
     // entity unloads and level teardown.
+    if (manualTrade != null && removed.contains(manualTrade.villager())) manualTrade = null;
+    if (replacementSource != null && (removed.contains(replacementSource)
+        || replacementTargets.stream().anyMatch(removed::contains))) endReplacementNavigation();
     if (selected != null && removed.contains(selected)) selected = null;
     if (navigationTarget != null && removed.contains(navigationTarget)) navigationTarget = null;
     nearby = Set.copyOf(records.keySet());
@@ -234,7 +242,10 @@ public final class VerdictService {
     removeIneligibleRecords();
     var before = probe.context();
     probe.tick();
-    if (before != null && probe.context() == null) restore();
+    if (before != null && probe.context() == null) {
+      if (manualTrade != null && !manualTrade.offersReceived()) manualTrade = null;
+      restore();
+    }
     if (probe.context() != null && !validContext()) cancel(State.CANCELLED);
     if (probe.context() != null
         && probe.context().mode() == Mode.AUTOMATIC
@@ -318,6 +329,9 @@ public final class VerdictService {
     notifications.clear();
     selected = null;
     navigationTarget = null;
+    replacementSource = null;
+    replacementTargets = Set.of();
+    manualTrade = null;
     ready = false;
     level = mc.level;
     if (level == null) {
@@ -444,6 +458,9 @@ public final class VerdictService {
     nearby = Set.of();
     selected = null;
     navigationTarget = null;
+    replacementSource = null;
+    replacementTargets = Set.of();
+    manualTrade = null;
     ticks = 0;
     dirty = false;
     // Configuration may have been edited after the clear began, while disk work was queued.
@@ -566,7 +583,6 @@ public final class VerdictService {
     long request = ++analysisRevision;
     long epoch = generation;
     var input = records.values().stream().filter(this::enabled).toList();
-    var targetCopy = List.copyOf(targets);
     var regionCopy = List.copyOf(regions);
     var options = settings;
     java.util.concurrent.CompletableFuture.supplyAsync(
@@ -575,14 +591,13 @@ public final class VerdictService {
               var optimizer = new Optimizer();
               var global =
                   optimizer.analyze(
-                        input, targetCopy, options.backups());
+                        input, options.backups());
               var perRegion = new LinkedHashMap<String, AnalysisResult>();
               for (var r : regionCopy)
                 perRegion.put(
                     r.id(),
                     optimizer.analyze(
                         input.stream().filter(r::contains).toList(),
-                        r.targets(),
                         options.backups()));
               return new Computed(global, Map.copyOf(perRegion), System.nanoTime() - start);
             },
@@ -601,6 +616,7 @@ public final class VerdictService {
                       analysis = result.global();
                       regional = result.regional();
                       analysisNanos = result.nanos();
+                      refreshReplacementNavigation();
                     }));
   }
 
@@ -631,13 +647,19 @@ public final class VerdictService {
       cancel(State.CONFLICT);
       return;
     }
+    manualTrade = null;
     boolean ok = probe.open(container, merchant);
+    var context = probe.context();
+    if (ok && merchant && context != null && context.mode() == Mode.MANUAL && validContext())
+      manualTrade = new ManualTradeSession(generation, context.uuid(), container, false);
     if (!ok) restore();
     contentSynced = false;
   }
 
   public boolean screen(Screen screen) {
     if (restoring) return false;
+    if (!(screen instanceof MerchantScreen merchant)
+        || manualTrade != null && merchant.getMenu().containerId != manualTrade.container()) manualTrade = null;
     var c = probe.context();
     if (screen instanceof MerchantScreen m
         && c != null
@@ -714,6 +736,8 @@ public final class VerdictService {
         changed();
       }
       if (c.mode() == Mode.MANUAL) {
+        if (manualTrade != null && manualTrade.container() == c.containerId())
+          manualTrade = new ManualTradeSession(generation, c.uuid(), c.containerId(), true);
         probe.releaseManual();
       }
     } catch (Exception e) {
@@ -723,6 +747,7 @@ public final class VerdictService {
   }
 
   public void closed(int id) {
+    if (manualTrade != null && manualTrade.container() == id) manualTrade = null;
     probe.closed(id);
     suppressed = null;
   }
@@ -792,6 +817,7 @@ public final class VerdictService {
   }
 
   public void cancel(State state) {
+    if (probe.context() != null && probe.context().mode() == Mode.MANUAL) manualTrade = null;
     probe.cancel(state);
     if (state == State.CONFLICT) probe.stop(state);
     restore();
@@ -839,19 +865,80 @@ public final class VerdictService {
   }
 
   public boolean navigationActive() {
-    return navigationTarget != null;
+    return navigationTarget != null || replacementSource != null;
   }
 
   public void startNavigation(UUID target) {
     var record = record(target);
     if (record == null || !enabled(record)) return;
+    replacementSource = null;
+    replacementTargets = Set.of();
     navigationTarget = target;
     prepareMarkers();
   }
 
   public void cancelNavigation() {
+    replacementSource = null;
+    replacementTargets = Set.of();
     navigationTarget = null;
     prepareMarkers();
+  }
+
+  public boolean analysisPending() {
+    return dirty || analysisInFlight;
+  }
+
+  public VillagerRecord tradingVillager(int container) {
+    if (manualTrade == null || manualTrade.generation() != generation
+        || manualTrade.container() != container || mc.player == null
+        || !(mc.player.containerMenu instanceof MerchantMenu)
+        || mc.player.containerMenu.containerId != container) return null;
+    var record = record(manualTrade.villager());
+    return record != null && enabled(record) ? record : null;
+  }
+
+  public boolean tradingOffersReceived(int container) {
+    return tradingVillager(container) != null && manualTrade.offersReceived();
+  }
+
+  public void merchantScreenRemoved(int container) {
+    if (manualTrade != null && manualTrade.container() == container) manualTrade = null;
+  }
+
+  public ReplacementSelection replacements(VillagerRecord source) {
+    var available = new LinkedHashMap<UUID, VillagerRecord>();
+    for (var record : records.values()) if (enabled(record)) available.put(record.uuid(), record);
+    return ReplacementSelection.resolve(source, analysis, available);
+  }
+
+  public boolean viewReplacements(int container) {
+    var source = tradingVillager(container);
+    if (source == null || !tradingOffersReceived(container) || analysisPending() || !settings.markers()) return false;
+    var selection = replacements(source);
+    if (selection.targets().isEmpty()) return false;
+    navigationTarget = null;
+    replacementSource = source.uuid();
+    replacementTargets = selection.targets();
+    selected = source.uuid();
+    mc.player.closeContainer();
+    prepareMarkers();
+    ShortcutActions.show(Component.translatable(selection.partial()
+        ? "vv.replacement.startedPartial" : "vv.replacement.started", replacementTargets.size()));
+    return true;
+  }
+
+  private void refreshReplacementNavigation() {
+    if (replacementSource == null) return;
+    var source = record(replacementSource);
+    var selection = source == null ? null : replacements(source);
+    if (selection == null || selection.targets().isEmpty()) endReplacementNavigation();
+    else replacementTargets = selection.targets();
+  }
+
+  private void endReplacementNavigation() {
+    replacementSource = null;
+    replacementTargets = Set.of();
+    ShortcutActions.show(Component.translatable("vv.replacement.ended"));
   }
 
   public double distanceSquared(VillagerRecord v) {
@@ -892,11 +979,11 @@ public final class VerdictService {
         || old.snapshot() != null && f.equals(old.snapshot().fingerprint())) return;
     boolean target =
         targets.stream()
-                .anyMatch(t -> snap.trades().stream().anyMatch(a -> t.matches(a) && t.priceMet(a)))
+                .anyMatch(t -> t.matches(old.withSnapshot(snap)))
             || regions.stream()
                 .filter(r -> r.contains(old))
                 .flatMap(r -> r.targets().stream())
-                .anyMatch(t -> snap.trades().stream().anyMatch(a -> t.matches(a) && t.priceMet(a)));
+                .anyMatch(t -> t.matches(old.withSnapshot(snap)));
     if (target || old.snapshot() != null) {
       SystemToast.add(
           mc.gui.toastManager(),
@@ -929,6 +1016,8 @@ public final class VerdictService {
             .filter(this::enabled)
             .filter(v -> nearby.contains(v.getUUID()))
             .filter(v -> navigationTarget == null || v.getUUID().equals(navigationTarget))
+            .filter(v -> replacementSource == null || v.getUUID().equals(replacementSource)
+                || replacementTargets.contains(v.getUUID()))
             .filter(v -> records.containsKey(v.getUUID())
                 && records.get(v.getUUID()).profession().equals(v.getVillagerData().profession().getRegisteredName()))
             .sorted(
@@ -944,8 +1033,24 @@ public final class VerdictService {
             case UNSCANNED -> settings.yellow();
             case DISCARD -> settings.red();
           };
-      var lines = MarkerText.lines(record, status, settings.statusMarks(), settings.summaries())
-          .stream().map(line -> (Component) line.copy().withColor(color)).toList();
+      var lines = new ArrayList<Component>();
+      if (replacementSource != null) {
+        boolean source = v.getUUID().equals(replacementSource);
+        color = source ? settings.red() : settings.green();
+        lines.add(Component.translatable(source ? "vv.replacement.source" : "vv.replacement.target").withColor(color));
+        if (!source) {
+          var sourceVerdict = analysis.verdicts().get(replacementSource);
+          if (sourceVerdict != null) {
+            var goods = new LinkedHashSet<String>();
+            for (var comparison : sourceVerdict.replacements())
+              if (comparison.replacement().equals(v.getUUID()))
+                goods.add(ClientDisplayText.productSummary(comparison.original().output()));
+            for (var good : goods) lines.add(Component.translatable("vv.replacement.covers", good).withColor(color));
+          }
+        }
+      }
+      for (var line : MarkerText.lines(record, status, settings.statusMarks(), settings.summaries()))
+        lines.add(line.copy().withColor(color));
       m.put(v.getUUID(), new Marker(color, lines));
     }
     markers = Map.copyOf(m);

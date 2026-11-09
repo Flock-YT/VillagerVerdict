@@ -2,6 +2,7 @@ package cn.ericcraft.villagerverdict.analysis;
 
 import cn.ericcraft.villagerverdict.model.ItemData;
 import cn.ericcraft.villagerverdict.model.Trade;
+import cn.ericcraft.villagerverdict.model.VillagerRecord;
 import java.util.*;
 
 /** Known signature goods, independent of unlock level, prices and Minecraft rendering. */
@@ -33,7 +34,15 @@ public final class ProfessionHighlights {
         return List.copyOf(entries.values());
     }
 
-    private static boolean signature(String profession, ItemData item) {
+    public static List<Trade> trades(VillagerRecord record) {
+        return record.snapshot() == null ? List.of() : trades(record.profession(), record.snapshot().trades());
+    }
+
+    public static List<Trade> trades(String profession, List<Trade> trades) {
+        return trades.stream().filter(t -> signature(profession, t.output())).toList();
+    }
+
+    public static boolean signature(String profession, ItemData item) {
         String id = item.item();
         return switch (profession) {
             case "minecraft:librarian" -> id.equals("minecraft:enchanted_book");

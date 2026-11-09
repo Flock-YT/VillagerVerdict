@@ -47,7 +47,7 @@ class StorageTest {
               .getFirst()
               .output()
               .enchantments()
-              .get("sharpness"));
+              .get("minecraft:sharpness"));
     }
   }
 
@@ -97,7 +97,7 @@ class StorageTest {
   @Test
   void clearingVillagersPreservesWorldConfiguration() {
     var target =
-        new TargetTrade("target", "minecraft:enchanted_book", "minecraft:sharpness", 1, 0, 1);
+        new TargetTrade("target", "minecraft:enchanted_book", "minecraft:sharpness", 1, 0);
     var region =
         new TradingHallRegion(
             "region",

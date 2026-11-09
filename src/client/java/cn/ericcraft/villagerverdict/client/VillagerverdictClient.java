@@ -31,6 +31,7 @@ public final class VillagerverdictClient implements ClientModInitializer {
   public void onInitializeClient() {
     var s = VerdictService.INSTANCE;
     s.init();
+    MerchantReplacementButton.register();
     var category =
         KeyMapping.Category.register(
             Identifier.fromNamespaceAndPath("villagerverdict", "controls"));

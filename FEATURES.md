@@ -27,13 +27,13 @@
 | 21 | 高级附魔优先于价格 | `ItemData.dominates / TradeComparison` | 单元 |
 | 22 | 装备其他组件及逐项附魔保守比较 | `ItemData.sameValue / dominates` | 单元；附魔集合不同时不替代 |
 | 23 | 不同附魔等级独立存储展示 | `TradeSnapshot / VerdictScreen` | 单元；真实多等级 GUI 未专项实测 |
-| 24 | 初始空目标，全部已知商品覆盖 | `Settings / WorldData.empty / Optimizer` | 单元与集成 |
-| 25 | 目标价格条件和最低保留数 | `TargetTrade / Optimizer` | 单元 |
+| 24 | 所有已知职业标志性商品覆盖 | `ProfessionHighlights / Optimizer` | 独有附魔、四本及更多附魔书单元与真实交易包集成 |
+| 25 | 商品查询的附魔和基础单价条件 | `TargetTrade.matches / VerdictScreen` | 单元及真实查询 UI、价格与区域筛选；不影响保留判定 |
 | 26 | 确定性贪心多重覆盖 | `Optimizer` | 单元及 500/4000 基准 |
 | 27 | 冗余移除和不可满足约束 | `Optimizer` | 单元 |
 | 28 | 人工保留固定纳入 | `VillagerRecord.fixed / Optimizer` | 单元 |
-| 29 | 目标范围外自动判为不保留 | `Optimizer` | 单元；目标筛选覆盖 |
-| 30 | 综合所有交易而非单交易定性 | `Optimizer` | 交叉交易覆盖单元 |
+| 29 | 无标志性产物时自动判为不保留 | `Optimizer` | 单元及真实客户端场景，手动保留例外 |
+| 30 | 综合该职业全部标志性交易定性 | `ProfessionHighlights / Optimizer` | 职业隔离、普通交易价格无影响、联合替代测试 |
 | 31 | 绿保留/红不保留/黄未扫描三状态 | `DisplayStatus / Optimizer / renderer` | 单元及真实客户端筛选、标记验证 |
 | 32 | 扫描后持续重读并更新保留结论 | `Optimizer / VerdictService` | 单元与真实附魔升级后红转绿集成 |
 | 33 | 替代 UUID/坐标/交易/价差及跳转 | `ComparisonResult / VerdictScreen.details` | 单元；点击跳转未专项实测 |
@@ -48,14 +48,14 @@
 | 42 | 职业/物品/附魔/等级/价格搜索 | `VerdictScreen.search` | 代码；所有搜索组合未验证 |
 | 43 | 价格/等级/距离/职业/综合排序 | `VerdictScreen.filtered` | 单元价格；所有 GUI 排序未逐项操作 |
 | 44 | 全交易、图标、提示、备注和标签 | `VerdictScreen / FormScreen` | 详情/图标截图；备注标签 CRUD 未完整实测 |
-| 45 | 目标完整编辑/删除 | `VerdictScreen.target / FormScreen` | 集成创建；编辑删除未逐项实测 |
+| 45 | 保存商品查询的新建、编辑、删除及结果跳转 | `VerdictScreen / TargetEditorScreen` | 真实 UI CRUD、清除筛选、价格与区域结果验证 |
 | 46 | 颜色、频率、提醒及完整重置 | `SettingsScreen` | 窄窗口边界断言、颜色截图、隐藏字段和跨服务器自启记录重置 |
 | 47 | 单写入队列与合并 | `JsonStore` | 100 次写入单元及真实场景 |
 | 48 | 损坏/未来版本写保护 | `JsonStore.read` | 单元 |
 | 49 | 最新快照、重启和迁移 | `WorldData / JsonStore / Settings` | 单元 |
 | 50 | 临时文件原子替换及世界异步切换 | `JsonStore.atomic / VerdictService` | 单元与双存档集成 |
 | 51 | 同维度长方体区域创建/编辑 | `TradingHallRegion / VerdictScreen.region` | 单元与创建集成 |
-| 52 | 重叠区域独立分析和目标 | `VerdictService.regional / updateTarget` | 代码；重叠实际场景未验证 |
+| 52 | 区域独立分析和商品查询 | `VerdictService.regional / updateTarget` | 区域查询筛选集成；查询不参与保留分析 |
 | 53 | 只统计当前已发现加载对象 | `VerdictService.stats` | 集成；无业对象单独统计 |
 | 54 | 扫描范围内未读取村民导航 | `navigateNext / HUD / ShortcutActions` | 真实导航快捷键、范围退出清理及无目标提示验证 |
 | 55 | 自动探测默认关闭/按服务器保存 | `Settings.autoServers / ProbeController` | 单元与集成 |

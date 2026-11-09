@@ -69,7 +69,6 @@ public final class TargetEditorScreen extends WorldScreen {
     private String enchantmentId;
     private int minLevel;
     private String maxPriceText;
-    private int backups;
     private String error = "";
 
     private EditBox priceBox;
@@ -99,7 +98,6 @@ public final class TargetEditorScreen extends WorldScreen {
         this.maxPriceText = existing == null || existing.maxUnitPrice() == 0
             ? "0"
             : UiFormatting.formatDecimal(existing.maxUnitPrice());
-        this.backups = existing == null ? 1 : Math.max(1, existing.backups());
         this.onSave = onSave;
         this.onDelete = onDelete;
     }
@@ -226,32 +224,6 @@ public final class TargetEditorScreen extends WorldScreen {
             error = "";
         });
         addRenderableWidget(priceBox);
-
-        var minusKeep = addRenderableWidget(Button.builder(
-                Component.literal("-"),
-                ignored -> {
-                    syncPriceBox();
-                    backups = Math.max(1, backups - 1);
-                    rebuildWidgets();
-                })
-            .bounds(ctrlX, 152, 24, 20)
-            .build());
-        minusKeep.active = backups > 1;
-        var keepDisp = addRenderableWidget(Button.builder(
-                Component.translatable("vv.targetEditor.keepCount", backups),
-                ignored -> {})
-            .bounds(ctrlX + 28, 152, 60, 20)
-            .build());
-        keepDisp.active = false;
-        addRenderableWidget(Button.builder(
-                Component.literal("+"),
-                ignored -> {
-                    syncPriceBox();
-                    backups = Math.min(16, backups + 1);
-                    rebuildWidgets();
-                })
-            .bounds(ctrlX + 92, 152, 24, 20)
-            .build());
 
         int footerY = height - 26;
         addRenderableWidget(Button.builder(Component.translatable("vv.save"), ignored -> saveAndClose())
@@ -501,7 +473,7 @@ public final class TargetEditorScreen extends WorldScreen {
             if (!Double.isFinite(price) || price < 0) throw new IllegalArgumentException("price >= 0");
             int level = enchantmentId.isBlank() ? 0 : Math.max(1, minLevel);
             var target = new TargetTrade(
-                targetId, itemId.trim(), enchantmentId.trim(), level, price, backups);
+                targetId, itemId.trim(), enchantmentId.trim(), level, price);
             onSave.accept(target);
             onClose();
         } catch (Exception e) {
@@ -534,18 +506,16 @@ public final class TargetEditorScreen extends WorldScreen {
             g.text(font, Component.translatable("vv.targetEditor.enchantLabel"), innerX, 63, 0xFF9FB8D8);
             g.text(font, Component.translatable("vv.targetEditor.levelLabel"), innerX, 106, 0xFFE6EDF7);
             g.text(font, Component.translatable("vv.targetEditor.priceLabel"), innerX, 132, 0xFFE6EDF7);
-            g.text(font, Component.translatable("vv.targetEditor.keepLabel"), innerX, 158, 0xFFE6EDF7);
 
             TargetTrade previewRule = new TargetTrade(
                 targetId,
                 itemId,
                 enchantmentId,
                 enchantmentId.isBlank() ? 0 : minLevel,
-                parseMaxPriceOrDefault(),
-                backups);
+                parseMaxPriceOrDefault());
             String previewText = Component.translatable(
                 "vv.targetEditor.preview", ClientDisplayText.targetSummary(previewRule)).getString();
-            int py = 178;
+            int py = 156;
             for (var line : font.split(Component.literal(previewText), innerW)) {
                 if (py < 24 + panelH - 10) {
                     g.text(font, line, innerX, py, 0xFF55DD88);
@@ -554,7 +524,7 @@ public final class TargetEditorScreen extends WorldScreen {
             }
             if (py + 10 < 24 + panelH) {
                 g.text(font, font.plainSubstrByWidth(
-                    Component.translatable("vv.targetEditor.keepTip").getString(), innerW),
+                    Component.translatable("vv.targetEditor.queryHelp").getString(), innerW),
                     innerX, py, 0xFF8CA4C4);
             }
         } else if (mode == Mode.PICK_ITEM) {

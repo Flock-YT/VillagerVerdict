@@ -44,6 +44,8 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       testShortcuts(c);
       testShortcutFeedback(c, server);
       testNavigation(c, server);
+      testReplacementSearch(c, server);
+      testSignatureProducts(c, server);
       testContinuousThreeStates(c, server, connection);
       UUID id =
           server.computeOnServer(
@@ -741,7 +743,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       if (!worlds.contains(other) || !worlds.contains(sibling.clearVillagers()))
         throw new AssertionError("server clear lost another server or sibling configuration");
     }
-    var extraTarget = new TargetTrade("during-clear", "minecraft:book", "", 1, 0, 1);
+    var extraTarget = new TargetTrade("during-clear", "minecraft:book", "", 1, 0);
     var clearing = c.computeOnClient(mc -> {
       var service = VerdictService.INSTANCE;
       var future = service.clearWorldVillagers(service.identity());
@@ -828,7 +830,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var cache = (Map<UUID, CachedTrade>) privateField(service, "tradeCache");
       var id = UUID.randomUUID();
       cache.put(id, new CachedTrade(id, "minecraft:librarian", new TradeSnapshot(List.of(), 1)));
-      var target = new TargetTrade("clear-" + transition, "minecraft:book", "", 1, 0, 1);
+      var target = new TargetTrade("clear-" + transition, "minecraft:book", "", 1, 0);
       var region = new TradingHallRegion("clear-" + transition, transition, service.identity().dimension(),
           0, 0, 0, 10, 10, 10, List.of(target), 0xFF55DD88);
       var targets = new ArrayList<>(service.targets);
@@ -918,6 +920,375 @@ public class ClientIntegrationTest implements FabricClientGameTest {
           throw new AssertionError("find changed verdict color");
       }
     });
+  }
+
+  private static net.minecraft.client.gui.components.AbstractWidget replacementButton(net.minecraft.client.Minecraft mc) {
+    return net.fabricmc.fabric.api.client.screen.v1.Screens.getWidgets(mc.gui.screen()).stream()
+        .filter(b -> b.getMessage().getString().equals(
+            net.minecraft.network.chat.Component.translatable("vv.replacement.view").getString()))
+        .findFirst().orElseThrow();
+  }
+
+  private void openReplacementMerchant(ClientGameTestContext c, UUID id) {
+    c.runOnClient(mc -> {
+      var v = mc.level.getEntity(id);
+      net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker().interact(
+          mc.player, mc.level, InteractionHand.MAIN_HAND, v, new EntityHitResult(v, v.position()));
+      mc.gameMode.interact(mc.player, v, new EntityHitResult(v, v.position()), InteractionHand.MAIN_HAND);
+    });
+    c.waitForScreen(MerchantScreen.class);
+    c.waitFor(mc -> VerdictService.INSTANCE.probe.context() == null && !VerdictService.INSTANCE.analysisPending());
+  }
+
+  private void testReplacementSearch(ClientGameTestContext c, TestServerContext server) {
+    var rotation = c.computeOnClient(mc -> new float[] {mc.player.getYRot(), mc.player.getXRot()});
+    var ids = server.computeOnServer(s -> {
+      var result = new ArrayList<UUID>();
+      for (int i = 0; i < 4; i++) {
+        var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+        setProfession(v, VillagerProfession.FARMER);
+        v.setVillagerData(v.getVillagerData().withLevel(5));
+        v.setNoAi(true);
+        v.setPos(1 + i % 2, -60, i < 2 ? 0 : 1);
+        var offers = new MerchantOffers();
+        if (i == 0 || i == 1) offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, i == 0 ? 10 : 1),
+            new ItemStack(Items.GOLDEN_CARROT), 12, 1, 0));
+        if (i == 0 || i == 2) offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, i == 0 ? 10 : 1),
+            new ItemStack(Items.GLISTERING_MELON_SLICE), 12, 1, 0));
+        if (i == 3) offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 1),
+            new ItemStack(Items.POTATO), 12, 1, 0));
+        v.setOffers(offers);
+        s.overworld().addFreshEntity(v);
+        result.add(v.getUUID());
+      }
+      return result;
+    });
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) != null));
+    c.runOnClient(mc -> VerdictService.INSTANCE.scan());
+    for (UUID id : ids) {
+      openReplacementMerchant(c, id);
+      c.runOnClient(mc -> mc.player.closeContainer());
+    }
+    UUID source = ids.getFirst();
+    openReplacementMerchant(c, source);
+    c.waitFor(mc -> replacementButton(mc).visible && replacementButton(mc).active);
+    var baseline = c.computeOnClient(mc -> VerdictService.INSTANCE.analysis);
+    for (var target : List.of(
+        new TargetTrade("test", "minecraft:potato", "", 0, 0),
+        new TargetTrade("test", "minecraft:golden_carrot", "", 0, 0))) {
+      c.runOnClient(mc -> {
+        VerdictService.INSTANCE.targets = List.of(target);
+        VerdictService.INSTANCE.changed();
+      });
+      c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending() && replacementButton(mc).active);
+      c.runOnClient(mc -> {
+        if (!baseline.equals(VerdictService.INSTANCE.analysis))
+          throw new AssertionError("product query changed retention or replacement explanation");
+      });
+    }
+    c.runOnClient(mc -> {
+      VerdictService.INSTANCE.targets = List.of();
+      VerdictService.INSTANCE.changed();
+    });
+    c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending() && replacementButton(mc).active);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (service.probe.context() != null || service.tradingVillager(mc.player.containerMenu.containerId) == null)
+        throw new AssertionError("manual session lost after offers");
+      if (!service.replacements(service.record(source)).targets().equals(Set.of(ids.get(1), ids.get(2))))
+        throw new AssertionError("joint replacements missing");
+      mc.resizeGui();
+      if (net.fabricmc.fabric.api.client.screen.v1.Screens.getWidgets(mc.gui.screen()).stream()
+          .filter(b -> b.getMessage().getString().equals(replacementButton(mc).getMessage().getString())).count() != 1)
+        throw new AssertionError("resize duplicated replacement button");
+      SettingsScreen.toggleMarkers();
+    });
+    c.waitFor(mc -> !replacementButton(mc).active);
+    c.runOnClient(mc -> SettingsScreen.toggleMarkers());
+    c.waitFor(mc -> replacementButton(mc).active);
+    c.takeScreenshot("replacement-merchant-button");
+    c.clickScreenButton("vv.replacement.view");
+    c.waitFor(mc -> mc.gui.screen() == null && mc.player.containerMenu == mc.player.inventoryMenu);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.tick();
+      if (!service.navigationActive() || !service.markers.keySet().equals(Set.of(source, ids.get(1), ids.get(2))))
+        throw new AssertionError("replacement search did not isolate all targets");
+      for (int i = 0; i < 3; i++) {
+        var state = mc.getEntityRenderDispatcher().getRenderer(mc.level.getEntity(ids.get(i)))
+            .createRenderState(mc.level.getEntity(ids.get(i)), 0);
+        int color = i == 0 ? service.settings.red() : service.settings.green();
+        String role = net.minecraft.network.chat.Component.translatable(
+            i == 0 ? "vv.replacement.source" : "vv.replacement.target").getString();
+        if (!state.appearsGlowing() || state.outlineColor != color || !labelText(state).contains(role))
+          throw new AssertionError("replacement role or outline incorrect");
+      }
+    });
+    server.runOnServer(s -> {
+      for (int i = 0; i < 4; i++) s.overworld().getEntity(ids.get(i)).setPos(-3 + i * 3, -60, 6);
+    });
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id).getZ() == 6));
+    c.getInput().lookAt(new net.minecraft.core.BlockPos(0, -59, 6));
+    c.waitTicks(5);
+    c.takeScreenshot("replacement-joint-highlights");
+    server.runOnServer(s -> {
+      for (int i = 0; i < 4; i++) s.overworld().getEntity(ids.get(i)).setPos(1 + i % 2, -60, i < 2 ? 0 : 1);
+    });
+    c.waitFor(mc -> mc.level.getEntity(source).getZ() == 0);
+    c.setScreen(VerdictScreen::new);
+    c.clickScreenButton("vv.cancelNavigate");
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.tick();
+      if (service.navigationActive() || !service.markers.containsKey(ids.get(3)))
+        throw new AssertionError("cancel did not restore markers");
+      mc.gui.setScreen(null);
+    });
+    // A different manual merchant must never inherit the previous source.
+    openReplacementMerchant(c, ids.get(1));
+    c.runOnClient(mc -> {
+      if (replacementButton(mc).visible || !VerdictService.INSTANCE.tradingVillager(
+          mc.player.containerMenu.containerId).uuid().equals(ids.get(1)))
+        throw new AssertionError("merchant association leaked across villagers");
+      mc.player.closeContainer();
+    });
+    openReplacementMerchant(c, source);
+    c.waitFor(mc -> replacementButton(mc).active);
+    c.clickScreenButton("vv.replacement.view");
+    // A published keep verdict must end the search without waiting for user action.
+    c.runOnClient(mc -> VerdictService.INSTANCE.edit(VerdictService.INSTANCE.record(source)
+        .withManual(VillagerRecord.Manual.KEEP, "", Set.of())));
+    c.waitFor(mc -> !VerdictService.INSTANCE.navigationActive());
+    c.runOnClient(mc -> VerdictService.INSTANCE.edit(VerdictService.INSTANCE.record(source)
+        .withManual(VillagerRecord.Manual.AUTO, "", Set.of())));
+    c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending());
+    openReplacementMerchant(c, source);
+    c.waitFor(mc -> replacementButton(mc).active);
+    c.clickScreenButton("vv.replacement.view");
+    server.runOnServer(s -> s.overworld().getEntity(ids.get(1)).discard());
+    c.waitFor(mc -> !VerdictService.INSTANCE.navigationActive());
+    c.runOnClient(mc -> {
+      if (VerdictService.INSTANCE.markers.containsKey(ids.get(1)))
+        throw new AssertionError("unloaded replacement retained marker");
+    });
+    server.runOnServer(s -> ids.stream().skip(1).map(id -> s.overworld().getEntity(id))
+        .filter(Objects::nonNull).forEach(net.minecraft.world.entity.Entity::discard));
+    server.runOnServer(s -> s.overworld().getEntity(source).discard());
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) == null));
+    c.runOnClient(mc -> {
+      mc.player.setYRot(rotation[0]);
+      mc.player.setXRot(rotation[1]);
+    });
+    System.out.println("VV_REPLACEMENT_SEARCH_PASS real merchant, released probe, joint targets, query independence, roles, resize, master switch, cancel, association, verdict refresh, unload");
+  }
+
+  private static MerchantOffer enchantedOffer(net.minecraft.server.level.ServerLevel level,
+      net.minecraft.resources.ResourceKey<net.minecraft.world.item.enchantment.Enchantment> enchantment,
+      int enchantmentLevel, int price) {
+    var stack = new ItemStack(Items.ENCHANTED_BOOK);
+    var registry = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+    net.minecraft.world.item.enchantment.EnchantmentHelper.updateEnchantments(stack,
+        ench -> ench.set(registry.getOrThrow(enchantment), enchantmentLevel));
+    return new MerchantOffer(new ItemCost(Items.EMERALD, price), stack, 12, 1, 0);
+  }
+
+  private void assertProductResults(ClientGameTestContext c, Set<UUID> expected) {
+    c.runOnClient(mc -> {
+      try {
+        var method = VerdictScreen.class.getDeclaredMethod("filtered");
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var records = (List<VillagerRecord>) method.invoke(mc.gui.screen());
+        var actual = records.stream().map(VillagerRecord::uuid).collect(java.util.stream.Collectors.toSet());
+        if (!expected.equals(actual)) throw new AssertionError("product results: " + actual + ", expected " + expected);
+      } catch (ReflectiveOperationException e) {
+        throw new AssertionError(e);
+      }
+    });
+  }
+
+  private void testSignatureProducts(ClientGameTestContext c, TestServerContext server) {
+    var reloadChinese = c.computeOnClient(mc -> {
+      mc.getLanguageManager().setSelected("zh_cn");
+      mc.options.languageCode = "zh_cn";
+      mc.gui.hud.setOverlayMessage(net.minecraft.network.chat.Component.empty(), false);
+      return mc.reloadResourcePacks();
+    });
+    c.waitFor(mc -> reloadChinese.isDone() && mc.gui.overlay() == null, 600);
+    var rotation = c.computeOnClient(mc -> new float[] {mc.player.getYRot(), mc.player.getXRot()});
+    var ids = server.computeOnServer(s -> {
+      var result = new ArrayList<UUID>();
+      var level = s.overworld();
+      for (int i = 0; i < 4; i++) {
+        var v = new Villager(EntityTypes.VILLAGER, level);
+        v.setNoAi(true);
+        v.setPos(1 + i % 2, -60, i / 2);
+        setProfession(v, VillagerProfession.LIBRARIAN);
+        var offers = new MerchantOffers();
+        offers.add(new MerchantOffer(new ItemCost(Items.PAPER, 24), new ItemStack(Items.EMERALD), 12, 1, 0));
+        offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 1), new ItemStack(Items.GLASS, 4), 12, 1, 0));
+        if (i == 0) {
+          offers.add(enchantedOffer(level, net.minecraft.world.item.enchantment.Enchantments.PROTECTION, 3, 31));
+          offers.add(enchantedOffer(level, net.minecraft.world.item.enchantment.Enchantments.FIRE_PROTECTION, 1, 5));
+        } else if (i == 1) {
+          offers.add(enchantedOffer(level, net.minecraft.world.item.enchantment.Enchantments.MULTISHOT, 1, 19));
+        } else if (i == 2) {
+          offers.add(enchantedOffer(level, net.minecraft.world.item.enchantment.Enchantments.MENDING, 1, 10));
+          offers.add(enchantedOffer(level, net.minecraft.world.item.enchantment.Enchantments.UNBREAKING, 3, 10));
+          offers.add(enchantedOffer(level, net.minecraft.world.item.enchantment.Enchantments.DEPTH_STRIDER, 3, 10));
+          offers.add(enchantedOffer(level, net.minecraft.world.item.enchantment.Enchantments.RESPIRATION, 3, 10));
+        }
+        v.setOffers(offers);
+        level.addFreshEntity(v);
+        result.add(v.getUUID());
+      }
+      return result;
+    });
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) != null));
+    c.runOnClient(mc -> VerdictService.INSTANCE.scan());
+    for (UUID id : ids) captureTrades(c, id);
+    c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending());
+    var baseline = c.computeOnClient(mc -> VerdictService.INSTANCE.analysis);
+    c.waitTicks(2);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      if (!service.analysis.recommended().equals(Set.of(ids.get(0), ids.get(1), ids.get(2))))
+        throw new AssertionError("unique signature products discarded");
+      if (!service.analysis.verdicts().get(ids.get(1)).replacements().isEmpty())
+        throw new AssertionError("ordinary shared goods explained multishot replacement");
+      var four = service.record(ids.get(2));
+      if (cn.ericcraft.villagerverdict.analysis.ProfessionHighlights.trades(four).size() != 4
+          || MarkerText.lines(four, DisplayStatus.KEEP, true, true).size() != 6)
+        throw new AssertionError("four enchanted books were truncated");
+      if (!service.analysis.verdicts().get(ids.get(3)).reason().equals("no signature goods"))
+        throw new AssertionError("no signature reason missing");
+    });
+    c.setScreen(VerdictScreen::new);
+    c.clickScreenButton("vv.targets");
+    c.clickScreenButton("vv.add");
+    c.runOnClient(mc -> mc.gui.hud.setOverlayMessage(net.minecraft.network.chat.Component.empty(), false));
+    c.takeScreenshot("signature-product-query-editor");
+    c.clickScreenButton("vv.save");
+    c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending());
+    c.runOnClient(mc -> {
+      if (!baseline.equals(VerdictService.INSTANCE.analysis)) throw new AssertionError("query creation changed verdicts");
+    });
+    var saved = c.computeOnClient(mc -> VerdictService.INSTANCE.targets.getFirst());
+    c.clickScreenButton("vv.target.viewVillagers");
+    assertProductResults(c, Set.of(ids.get(0), ids.get(1), ids.get(2)));
+    c.takeScreenshot("signature-product-query-results");
+    c.clickScreenButton("vv.clearProductFilter");
+    assertProductResults(c, Set.copyOf(ids));
+    c.clickScreenButton("vv.targets");
+    clickButtonPrefix(c, ClientDisplayText.targetSummary(saved));
+    c.clickScreenButton("vv.targetEditor.anyEnchant");
+    c.runOnClient(mc -> mc.gui.screen().children().stream()
+        .filter(child -> child instanceof net.minecraft.client.gui.components.EditBox)
+        .map(child -> (net.minecraft.client.gui.components.EditBox) child).findFirst().orElseThrow()
+        .setValue("multishot"));
+    c.waitTicks(1);
+    clickButtonPrefix(c, net.minecraft.network.chat.Component.translatable("enchantment.minecraft.multishot").getString());
+    c.clickScreenButton("vv.save");
+    c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending());
+    c.clickScreenButton("vv.target.viewVillagers");
+    assertProductResults(c, Set.of(ids.get(1)));
+    c.runOnClient(mc -> {
+      if (!baseline.equals(VerdictService.INSTANCE.analysis)) throw new AssertionError("query editing changed verdicts");
+      var service = VerdictService.INSTANCE;
+      var query = service.targets.getFirst();
+      service.targets = List.of(new TargetTrade(query.id(), query.item(), query.enchantment(), query.minLevel(), 18));
+      service.changed();
+    });
+    c.waitTicks(22);
+    assertProductResults(c, Set.of());
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.targets = List.of(saved);
+      service.regions = new ArrayList<>(List.of(new TradingHallRegion("signature-query", "Single librarian",
+          service.identity().dimension(), 1.9, -61, -.1, 2.1, -58, .1, List.of(saved), 0x55DD88)));
+      service.changed();
+    });
+    c.clickScreenButton("vv.targets");
+    clickButtonPrefix(c, net.minecraft.network.chat.Component.translatable("vv.target.scope", "").getString().trim());
+    c.clickScreenButton("vv.target.viewVillagers");
+    assertProductResults(c, Set.of(ids.get(1)));
+    c.clickScreenButton("vv.clearProductFilter");
+    c.clickScreenButton("vv.targets");
+    clickButtonPrefix(c, ClientDisplayText.targetSummary(saved));
+    c.clickScreenButton("vv.delete");
+    c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending());
+    c.runOnClient(mc -> {
+      if (!baseline.equals(VerdictService.INSTANCE.analysis) || !VerdictService.INSTANCE.targets.isEmpty())
+        throw new AssertionError("query deletion changed verdicts or did not delete");
+      VerdictService.INSTANCE.regions = new ArrayList<>();
+      VerdictService.INSTANCE.changed();
+      mc.gui.setScreen(null);
+    });
+    // Inspect the exact screenshot scenario before introducing a real multishot replacement.
+    server.runOnServer(s -> {
+      for (int i = 0; i < 4; i++) s.overworld().getEntity(ids.get(i)).setPos(-4 + i * 3, -60, 6);
+    });
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id).getZ() == 6));
+    c.getInput().lookAt(new net.minecraft.core.BlockPos(0, -59, 6));
+    c.waitTicks(5);
+    c.takeScreenshot("signature-unique-multishot-four-books");
+    var actualReplacement = server.computeOnServer(s -> {
+      var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+      v.setNoAi(true);
+      v.setPos(1, -60, 0);
+      setProfession(v, VillagerProfession.LIBRARIAN);
+      var offers = new MerchantOffers();
+      offers.add(enchantedOffer(s.overworld(), net.minecraft.world.item.enchantment.Enchantments.MULTISHOT, 1, 10));
+      v.setOffers(offers);
+      s.overworld().addFreshEntity(v);
+      return v.getUUID();
+    });
+    c.waitFor(mc -> mc.level.getEntity(actualReplacement) != null);
+    c.runOnClient(mc -> VerdictService.INSTANCE.scan());
+    captureTrades(c, actualReplacement);
+    c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending());
+    server.runOnServer(s -> s.overworld().getEntity(ids.get(1)).setPos(2, -60, 0));
+    c.waitFor(mc -> mc.level.getEntity(ids.get(1)).getZ() == 0);
+    openReplacementMerchant(c, ids.get(1));
+    c.waitFor(mc -> replacementButton(mc).active);
+    c.clickScreenButton("vv.replacement.view");
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.tick();
+      if (!service.markers.keySet().equals(Set.of(ids.get(1), actualReplacement)))
+        throw new AssertionError("highlighted ordinary goods provider instead of actual multishot source");
+      var expected = net.minecraft.network.chat.Component.translatable("vv.replacement.covers",
+          ClientDisplayText.productSummary(service.record(ids.get(1)).snapshot().trades().getLast().output())).getString();
+      if (service.markers.get(actualReplacement).lines().stream().noneMatch(line -> line.getString().equals(expected)))
+        throw new AssertionError("replacement coverage label missing");
+    });
+    server.runOnServer(s -> {
+      s.overworld().getEntity(ids.get(1)).setPos(-2, -60, 6);
+      s.overworld().getEntity(actualReplacement).setPos(2, -60, 6);
+    });
+    c.waitFor(mc -> mc.level.getEntity(ids.get(1)).getZ() == 6
+        && mc.level.getEntity(actualReplacement).getZ() == 6);
+    c.getInput().lookAt(new net.minecraft.core.BlockPos(0, -59, 6));
+    c.waitTicks(5);
+    c.takeScreenshot("signature-actual-multishot-replacement");
+    c.runOnClient(mc -> VerdictService.INSTANCE.cancelNavigation());
+    server.runOnServer(s -> {
+      ids.forEach(id -> s.overworld().getEntity(id).discard());
+      s.overworld().getEntity(actualReplacement).discard();
+    });
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) == null)
+        && mc.level.getEntity(actualReplacement) == null);
+    c.runOnClient(mc -> {
+      mc.player.setYRot(rotation[0]);
+      mc.player.setXRot(rotation[1]);
+    });
+    var reloadEnglish = c.computeOnClient(mc -> {
+      mc.getLanguageManager().setSelected("en_us");
+      mc.options.languageCode = "en_us";
+      return mc.reloadResourcePacks();
+    });
+    c.waitFor(mc -> reloadEnglish.isDone() && mc.gui.overlay() == null, 600);
+    System.out.println("VV_SIGNATURE_PRODUCTS_PASS real multishot mismatch, four books, no signature, query UI CRUD, price and region filters, independent verdicts, exact replacement labels");
   }
 
   private void testNavigation(ClientGameTestContext c, TestServerContext server) {

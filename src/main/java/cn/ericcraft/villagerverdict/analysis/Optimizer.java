@@ -9,12 +9,28 @@ import java.util.stream.*;
 
 /** Deterministic greedy multicover with a reverse redundancy pass; never claims optimality. */
 public final class Optimizer {
-  private record Demand(String id, Trade trade, TargetTrade target, int count, boolean priceGuarantee) {}
+  private record Demand(String id, Trade trade, int count, boolean priceGuarantee) {}
 
-  public AnalysisResult analyze(
-      Collection<VillagerRecord> input,
-      List<TargetTrade> targets,
-      int backups) {
+  public AnalysisResult analyze(Collection<VillagerRecord> input, int backups) {
+    if (backups < 1) throw new IllegalArgumentException("backups");
+    var recommended = new LinkedHashSet<UUID>();
+    var verdicts = new LinkedHashMap<UUID, Verdict>();
+    var gaps = new ArrayList<String>();
+    var professions = input.stream().collect(Collectors.groupingBy(
+        VillagerRecord::profession, TreeMap::new, Collectors.toList()));
+    for (var group : professions.values()) {
+      // Keep the source snapshots intact; ordinary trades never enter optimization.
+      var filtered = group.stream().map(v -> v.snapshot() == null ? v
+          : v.withSnapshot(new TradeSnapshot(ProfessionHighlights.trades(v), v.snapshot().checkedAt()))).toList();
+      var result = analyzeProfession(filtered, backups);
+      recommended.addAll(result.recommended());
+      verdicts.putAll(result.verdicts());
+      gaps.addAll(result.gaps());
+    }
+    return new AnalysisResult(recommended, verdicts, gaps);
+  }
+
+  private AnalysisResult analyzeProfession(Collection<VillagerRecord> input, int backups) {
     var records = input.stream().sorted(Comparator.comparing(v -> v.uuid().toString())).toList();
     var known = records.stream().filter(v -> v.snapshot() != null).toList();
     var all =
@@ -24,51 +40,19 @@ public final class Optimizer {
             .sorted(priceOrder())
             .toList();
     var demands = new ArrayList<Demand>();
-    if (targets.isEmpty()) {
-      for (Trade t : all)
-        if (all.stream().noneMatch(a -> !a.equals(t) && replaces(a, t) && !replaces(t, a))) {
-          if (demands.stream().noneMatch(d -> coversValue(d.trade, t) && coversValue(t, d.trade)))
-            demands.add(
-                new Demand(
-                    t.output().name() + t.output().enchantments() + " / " + t.baseInput().item(),
-                    t,
-                    null,
-                    backups, false));
-        }
-    } else
-      for (TargetTrade t : targets) {
-        var matches = all.stream().filter(t::matches).toList();
-        var highest =
-            matches.stream()
-                .filter(a -> matches.stream().noneMatch(b -> b.output().higherThan(a.output())))
-                .toList();
-        // Keep the highest known level even if its price exceeds the target.
-        for (Trade a : highest)
-          if (demands.stream()
-              .noneMatch(
-                  d ->
-                      d.id.startsWith(t.id() + "|")
-                          && coversValue(d.trade, a)
-                          && coversValue(a, d.trade)))
-            demands.add(
-                new Demand(
-                    t.id() + "|" + a.output().name() + a.output().enchantments(),
-                    a,
-                    t,
-                    t.backups(), false));
-        if (matches.isEmpty()) demands.add(new Demand(t.id(), null, t, t.backups(), false));
+    for (Trade t : all)
+      if (all.stream().noneMatch(a -> !a.equals(t) && replaces(a, t) && !replaces(t, a))) {
+        if (demands.stream().noneMatch(d -> coversValue(d.trade, t) && coversValue(t, d.trade)))
+          demands.add(new Demand(t.output().item() + " " + t.output().enchantments(), t, backups, false));
       }
     // Commodity backups may cost more, but at least one retained trader must preserve
     // each nondominated price vector. Use the same replacement rule as the verdict pass.
-    var relevant = all.stream()
-        .filter(t -> targets.isEmpty() || targets.stream().anyMatch(target -> target.matches(t)))
-        .toList();
     var priceDemands = new ArrayList<Demand>();
-    for (var t : relevant) {
-      if (relevant.stream().anyMatch(a -> replaces(a, t) && !replaces(t, a))) continue;
+    for (var t : all) {
+      if (all.stream().anyMatch(a -> replaces(a, t) && !replaces(t, a))) continue;
       if (priceDemands.stream().anyMatch(d -> replaces(d.trade, t) && replaces(t, d.trade))) continue;
       priceDemands.add(new Demand("best price: " + t.output().name() + t.output().enchantments(),
-          t, null, 1, true));
+          t, 1, true));
     }
     demands.addAll(priceDemands);
     var covers = new LinkedHashMap<UUID, Set<Integer>>();
@@ -118,23 +102,7 @@ public final class Optimizer {
     for (int i = 0; i < counts.length; i++) {
       var d = demands.get(i);
       if (counts[i] < d.count)
-        gaps.add(
-            (d.target == null ? d.id : d.target.item() + " " + d.target.enchantment())
-                + ": "
-                + counts[i]
-                + "/"
-                + d.count);
-      if (d.target != null
-          && d.trade != null
-          && known.stream()
-                  .filter(v -> selected.contains(v.uuid()))
-                  .filter(
-                      v ->
-                          v.snapshot().trades().stream()
-                              .anyMatch(t -> coversValue(t, d.trade) && d.target.priceMet(t)))
-                  .count()
-              < d.count)
-        gaps.add(d.target.item() + " " + d.target.enchantment() + ": price condition unmet");
+        gaps.add(d.id + ": " + counts[i] + "/" + d.count);
     }
     var verdicts = new LinkedHashMap<UUID, Verdict>();
     for (var v : known) {
@@ -180,7 +148,7 @@ public final class Optimizer {
           status == Status.KEEP
               ? "coverage / unique value"
               : "all known trades have replacements";
-      if (status == Status.DISCARD && unique > 0) reason = "outside target scope";
+      if (status == Status.DISCARD && v.snapshot().trades().isEmpty()) reason = "no signature goods";
       verdicts.put(
           v.uuid(),
           new Verdict(

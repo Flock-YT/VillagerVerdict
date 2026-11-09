@@ -1,6 +1,7 @@
 package cn.ericcraft.villagerverdict.client;
 
 import cn.ericcraft.villagerverdict.model.DisplayStatus;
+import cn.ericcraft.villagerverdict.model.ItemData;
 import cn.ericcraft.villagerverdict.model.TargetTrade;
 import cn.ericcraft.villagerverdict.model.UiFormatting;
 import java.time.Instant;
@@ -102,18 +103,24 @@ public final class ClientDisplayText {
         return "vv.ui.status." + status.name().toLowerCase(Locale.ROOT);
     }
 
+    public static String productSummary(ItemData item) {
+        if (item.enchantments().isEmpty()) return ItemCodecAdapter.displayName(item);
+        String enchantments = ItemCodecAdapter.enchantmentText(item);
+        return item.item().equals("minecraft:enchanted_book") ? enchantments
+            : ItemCodecAdapter.displayName(item) + " (" + enchantments + ")";
+    }
+
     public static String targetSummary(TargetTrade t) {
         String itemName = itemDisplayName(t.item());
         String priceText = t.maxUnitPrice() == 0
             ? Component.translatable("vv.target.anyPrice").getString()
             : Component.translatable("vv.target.maxPriceShort", UiFormatting.formatDecimal(t.maxUnitPrice())).getString();
-        String keepText = Component.translatable("vv.target.keepShort", t.backups()).getString();
         if (t.enchantment() == null || t.enchantment().isBlank()) {
-            return Component.translatable("vv.target.rowPlain", itemName, priceText, keepText).getString();
+            return Component.translatable("vv.target.rowPlain", itemName, priceText).getString();
         }
         String enchName = enchantmentDisplayName(t.enchantment());
         return Component.translatable("vv.target.rowEnchanted",
-            itemName, enchName, t.minLevel(), priceText, keepText).getString();
+            itemName, enchName, t.minLevel(), priceText).getString();
     }
 
     public static String formatGap(String rawGap) {
