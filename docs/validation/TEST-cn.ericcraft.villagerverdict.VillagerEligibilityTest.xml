@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="cn.ericcraft.villagerverdict.VillagerEligibilityTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-08T15:36:18.866Z" hostname="Mac-Mini.local" time="0.001">
+<testsuite name="cn.ericcraft.villagerverdict.VillagerEligibilityTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-08T18:07:07.803Z" hostname="Mac-Mini.local" time="0.0">
   <properties/>
-  <testcase name="unemployedAndNitwitsAreExcluded()" classname="cn.ericcraft.villagerverdict.VillagerEligibilityTest" time="0.001"/>
+  <testcase name="unemployedAndNitwitsAreExcluded()" classname="cn.ericcraft.villagerverdict.VillagerEligibilityTest" time="0.0"/>
   <testcase name="babiesAreExcludedRegardlessOfProfession()" classname="cn.ericcraft.villagerverdict.VillagerEligibilityTest" time="0.0"/>
   <testcase name="adultWorkersAreEligibleIncludingCustomProfessions()" classname="cn.ericcraft.villagerverdict.VillagerEligibilityTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>

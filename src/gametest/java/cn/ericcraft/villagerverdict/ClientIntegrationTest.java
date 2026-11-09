@@ -131,8 +131,14 @@ public class ClientIntegrationTest implements FabricClientGameTest {
           });
       c.waitFor(mc -> VerdictService.INSTANCE.analysis.verdicts().containsKey(id));
       c.takeScreenshot("management-en");
-      c.clickScreenButton("vv.details");
+      clickButtonContaining(c, "Lv.");
       c.takeScreenshot("details-en");
+      clickButtonPrefix(c, net.minecraft.network.chat.Component.translatable("vv.edit").getString());
+      c.waitForScreen(VillagerEditScreen.class);
+      c.runOnClient(this::assertTransparent);
+      c.takeScreenshot("villager-edit-en");
+      c.clickScreenButton("gui.cancel");
+      c.clickScreenButton("vv.backToList");
       c.runOnClient(
           mc -> {
             mc.options.guiScale().set(1);
@@ -161,14 +167,44 @@ public class ClientIntegrationTest implements FabricClientGameTest {
           });
       c.clickScreenButton("vv.targets");
       c.clickScreenButton("vv.add");
+      c.waitForScreen(TargetEditorScreen.class);
+      c.runOnClient(this::assertTransparent);
       c.takeScreenshot("target-editor");
+      clickButtonContaining(c, net.minecraft.network.chat.Component.translatable("vv.targetEditor.changeItem").getString());
+      c.runOnClient(this::assertTransparent);
+      c.takeScreenshot("target-item-picker");
+      c.clickScreenButton("vv.targetEditor.backToForm");
+      c.clickScreenButton("vv.targetEditor.anyEnchant");
+      c.runOnClient(this::assertTransparent);
+      c.takeScreenshot("target-enchant-picker");
+      c.clickScreenButton("vv.targetEditor.backToForm");
       c.clickScreenButton("vv.save");
+      c.takeScreenshot("targets-populated-zh");
       c.clickScreenButton("vv.regions");
       c.clickScreenButton("vv.add");
+      c.waitForScreen(RegionEditorScreen.class);
+      c.runOnClient(this::assertTransparent);
       c.takeScreenshot("region-editor");
+      c.clickScreenButton("vv.regionEditor.radius16");
       c.clickScreenButton("vv.save");
+      c.takeScreenshot("regions-populated-zh");
+      c.clickScreenButton("vv.villagers");
+      c.runOnClient(mc -> VerdictService.INSTANCE.selected = id);
+      clickButtonContaining(c, "Lv.");
+      clickButtonPrefix(c, net.minecraft.network.chat.Component.translatable("vv.edit").getString());
+      c.waitForScreen(VillagerEditScreen.class);
+      c.takeScreenshot("villager-edit-zh");
+      c.clickScreenButton("gui.cancel");
+      c.clickScreenButton("vv.backToList");
       c.clickScreenButton("vv.settings");
+      c.waitForScreen(SettingsScreen.class);
       c.takeScreenshot("settings");
+      c.clickScreenButton("vv.settings.tab.probe");
+      c.takeScreenshot("settings-probe-zh");
+      c.clickScreenButton("vv.settings.tab.rules");
+      c.takeScreenshot("settings-rules-zh");
+      c.clickScreenButton("vv.settings.tab.tools");
+      c.takeScreenshot("settings-tools-zh");
       c.clickScreenButton("gui.cancel");
       c.runOnClient(
           mc -> {
@@ -414,7 +450,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     testNativeBindings(c, "en");
     c.getInput().pressKey(InputConstants.KEY_F8);
     c.waitForScreen(VerdictScreen.class);
-    c.clickScreenButton("vv.shortcuts");
+    openShortcutsViaSettings(c);
     c.waitForScreen(ShortcutScreen.class);
     c.takeScreenshot("shortcuts-en");
     c.clickScreenButton("key.villagerverdict.scan");
@@ -471,7 +507,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.getInput().pressKey(InputConstants.KEY_F9);
     c.getInput().pressKey(InputConstants.KEY_F8);
     c.waitForScreen(VerdictScreen.class);
-    c.clickScreenButton("vv.shortcuts");
+    openShortcutsViaSettings(c);
     c.clickScreenButton("key.villagerverdict.scan");
     c.getInput().pressKey(InputConstants.KEY_F8);
     c.waitForScreen(ShortcutScreen.class);
@@ -510,7 +546,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     });
     c.getInput().pressKey(InputConstants.KEY_F7);
     c.waitForScreen(VerdictScreen.class);
-    c.clickScreenButton("vv.shortcuts");
+    openShortcutsViaSettings(c);
     c.clickScreenButton("vv.restoreDefaults");
     c.runOnClient(mc -> mc.gui.setScreen(null));
     testMouseShortcuts(c, shortcutsPath);
@@ -603,7 +639,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       store.flush().join();
     }
     c.setScreen(VerdictScreen::new);
-    c.clickScreenButton("vv.shortcuts");
+    openShortcutsViaSettings(c);
     c.takeScreenshot("shortcuts-zh");
     c.clickScreenButton("gui.done");
     c.clickScreenButton("vv.data");
@@ -637,13 +673,14 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         throw new AssertionError("world clear leaked to a sibling or other server");
     }
     c.clickScreenButton("gui.done");
+    c.clickScreenButton("gui.cancel");
     c.clickScreenButton("vv.scan");
     c.waitFor(mc -> VerdictService.INSTANCE.records().size() >= 303);
     c.runOnClient(mc -> {
       if (VerdictService.INSTANCE.records().stream().anyMatch(v -> v.snapshot() != null))
         throw new AssertionError("fresh scan restored old trade snapshots");
     });
-    c.clickScreenButton("vv.data");
+    openDataViaSettings(c);
     waitDataScreen(c);
     c.clickScreenButton("vv.clearServer");
     c.clickScreenButton("gui.yes");
@@ -931,12 +968,51 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         c.takeScreenshot("transparent-management-" + locale + "-" + lighting + "-" + scale);
       }
     }
-    for (String page : List.of("vv.details", "vv.targets", "vv.regions", "vv.settings", "vv.shortcuts", "vv.data")) {
-      c.setScreen(VerdictScreen::new);
+    c.setScreen(VerdictScreen::new);
+    clickButtonContaining(c, "Lv.");
+    c.runOnClient(this::assertTransparent);
+    c.takeScreenshot("transparent-details-" + locale);
+    c.clickScreenButton("vv.backToList");
+
+    for (String page : List.of("vv.targets", "vv.regions")) {
       c.clickScreenButton(page);
       c.runOnClient(this::assertTransparent);
       c.takeScreenshot("transparent-" + page.substring(3) + "-" + locale);
     }
+
+    c.clickScreenButton("vv.settings");
+    c.waitForScreen(SettingsScreen.class);
+    c.runOnClient(this::assertTransparent);
+    c.takeScreenshot("transparent-settings-" + locale);
+
+    c.clickScreenButton("vv.settings.tab.probe");
+    c.runOnClient(this::assertTransparent);
+    c.takeScreenshot("transparent-settings-probe-" + locale);
+
+    c.clickScreenButton("vv.settings.tab.rules");
+    c.runOnClient(this::assertTransparent);
+    c.takeScreenshot("transparent-settings-rules-" + locale);
+    c.clickScreenButton("vv.professions");
+    c.waitForScreen(ProfessionScreen.class);
+    c.runOnClient(this::assertTransparent);
+    c.clickScreenButton("gui.cancel");
+
+    c.clickScreenButton("vv.settings.tab.tools");
+    c.runOnClient(this::assertTransparent);
+    c.takeScreenshot("transparent-settings-tools-" + locale);
+
+    c.clickScreenButton("vv.shortcuts");
+    c.waitForScreen(ShortcutScreen.class);
+    c.runOnClient(this::assertTransparent);
+    c.takeScreenshot("transparent-shortcuts-" + locale);
+    c.clickScreenButton("gui.done");
+
+    c.clickScreenButton("vv.data");
+    c.waitForScreen(DataScreen.class);
+    c.runOnClient(this::assertTransparent);
+    c.takeScreenshot("transparent-data-" + locale);
+    c.clickScreenButton("gui.done");
+
     c.runOnClient(mc -> {
       mc.options.guiScale().set(originalScale);
       mc.resizeGui();
@@ -1089,6 +1165,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         throw new AssertionError("disabled profession counted in stats");
       SettingsScreen.open(null);
     });
+    c.clickScreenButton("vv.settings.tab.rules");
     c.clickScreenButton("vv.professions");
     c.runOnClient(mc -> mc.gui.toastManager().clear());
     c.takeScreenshot("profession-filter-zh");
@@ -1100,6 +1177,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         throw new AssertionError("cancelled settings saved profession draft");
       SettingsScreen.open(null);
     });
+    c.clickScreenButton("vv.settings.tab.rules");
     c.clickScreenButton("vv.professions");
     c.clickScreenButton("vv.selectAll");
     c.clickScreenButton("vv.selectNone");
@@ -1621,6 +1699,50 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     public void close() {
       release.countDown();
     }
+  }
+
+  private void openShortcutsViaSettings(ClientGameTestContext c) {
+    c.clickScreenButton("vv.settings");
+    c.waitForScreen(SettingsScreen.class);
+    c.clickScreenButton("vv.settings.tab.tools");
+    c.clickScreenButton("vv.shortcuts");
+  }
+
+  private void openDataViaSettings(ClientGameTestContext c) {
+    c.clickScreenButton("vv.settings");
+    c.waitForScreen(SettingsScreen.class);
+    c.clickScreenButton("vv.settings.tab.tools");
+    c.clickScreenButton("vv.data");
+  }
+
+  private void clickButtonContaining(ClientGameTestContext c, String needle) {
+    c.runOnClient(mc -> {
+      var info = new net.minecraft.client.input.MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0);
+      for (var child : mc.gui.screen().children()) {
+        if (child instanceof net.minecraft.client.gui.components.Button button
+            && button.active
+            && button.getMessage().getString().contains(needle)) {
+          button.onPress(info);
+          return;
+        }
+      }
+      throw new AssertionError("No active button matching '" + needle + "' on " + mc.gui.screen());
+    });
+  }
+
+  private void clickButtonPrefix(ClientGameTestContext c, String prefix) {
+    c.runOnClient(mc -> {
+      var info = new net.minecraft.client.input.MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0);
+      for (var child : mc.gui.screen().children()) {
+        if (child instanceof net.minecraft.client.gui.components.Button button
+            && button.active
+            && button.getMessage().getString().startsWith(prefix)) {
+          button.onPress(info);
+          return;
+        }
+      }
+      throw new AssertionError("No active button starting with '" + prefix + "' on " + mc.gui.screen());
+    });
   }
 
   private void waitDataScreen(ClientGameTestContext c) {

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="cn.ericcraft.villagerverdict.PerformanceTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-11-08T16:40:24.620Z" hostname="Mac-Mini.local" time="0.195">
+<testsuite name="cn.ericcraft.villagerverdict.PerformanceTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-11-08T18:07:07.476Z" hostname="Mac-Mini.local" time="0.191">
   <properties/>
-  <testcase name="analyzeFiveHundredVillagers()" classname="cn.ericcraft.villagerverdict.PerformanceTest" time="0.195"/>
-  <system-out><![CDATA[VV_BENCHMARK villagers=500 trades=4000 analyze_ms=190.425208 retained=30
+  <testcase name="analyzeFiveHundredVillagers()" classname="cn.ericcraft.villagerverdict.PerformanceTest" time="0.191"/>
+  <system-out><![CDATA[VV_BENCHMARK villagers=500 trades=4000 analyze_ms=186.20525 retained=30
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

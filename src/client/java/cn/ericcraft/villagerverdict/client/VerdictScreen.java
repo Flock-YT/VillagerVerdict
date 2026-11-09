@@ -1,835 +1,929 @@
 package cn.ericcraft.villagerverdict.client;
 
-import static cn.ericcraft.villagerverdict.client.FormScreen.fields;
-
+import cn.ericcraft.villagerverdict.analysis.ProfessionHighlights;
 import cn.ericcraft.villagerverdict.analysis.TradeComparison;
-import cn.ericcraft.villagerverdict.model.*;
-import cn.ericcraft.villagerverdict.model.AnalysisResult.*;
-import java.util.*;
+import cn.ericcraft.villagerverdict.model.AnalysisResult;
+import cn.ericcraft.villagerverdict.model.AnalysisResult.Verdict;
+import cn.ericcraft.villagerverdict.model.ComparisonResult;
+import cn.ericcraft.villagerverdict.model.DisplayStatus;
+import cn.ericcraft.villagerverdict.model.ItemData;
+import cn.ericcraft.villagerverdict.model.TargetTrade;
+import cn.ericcraft.villagerverdict.model.Trade;
+import cn.ericcraft.villagerverdict.model.TradingHallRegion;
+import cn.ericcraft.villagerverdict.model.UiFormatting;
+import cn.ericcraft.villagerverdict.model.VillagerRecord;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TreeSet;
+import java.util.UUID;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.*;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
 
+/** Main management workspace with single-row navigation, plain-language details, and intuitive controls. */
 public final class VerdictScreen extends WorldScreen {
-  private final VerdictService s = VerdictService.INSTANCE;
-  private int page, offset, detailOffset, sort, filter;
-  private EditBox searchBox;
-  private boolean restoreSearch;
-  private int searchCursor;
-  private String query = "", regionId = "";
-  private boolean nearbyOnly;
-  private static final String[] SORTS = {
-    "vv.value", "vv.price", "vv.enchantment", "vv.distance", "vv.profession"
-  };
-  private final List<Icon> icons = new ArrayList<>();
-
-  private record Icon(ItemData item, int x, int y) {}
-
-  public VerdictScreen() {
-    super(Component.literal("Villager Verdict"));
-  }
-
-  private int top() {
-    return 56 + ((7 + navigationColumns() - 1) / navigationColumns()) * 24;
-  }
-
-  private int navigationColumns() {
-    return width >= 640 ? 7 : width >= 460 ? 4 : 3;
-  }
-
-  private int listWidth() {
-    return width >= 640 ? width / 2 - 16 : width - 24;
-  }
-
-  protected void init() {
-    String[] names = {
-      "vv.villagers",
-      "vv.details",
-      "vv.targets",
-      "vv.regions",
-      "vv.settings",
-      "vv.shortcuts",
-      "vv.data"
+    private static final String[] SORTS = {
+        "vv.value", "vv.price", "vv.enchantment", "vv.distance", "vv.profession"
     };
-    int columns = navigationColumns();
-    int bw = (width - 24) / columns;
-    for (int i = 0; i < names.length; i++) {
-      int p = i;
-      button(
-          Component.translatable(names[i]),
-          12 + (i % columns) * bw,
-          26 + (i / columns) * 24,
-          bw - 3,
-          () -> {
-            if (p == 4) SettingsScreen.open(this);
-            else if (p == 5) ShortcutScreen.open(this);
-            else if (p == 6) DataScreen.open(this);
-            else {
-              page = p;
-              offset = detailOffset = 0;
-              rebuildWidgets();
-            }
-          });
+    private static final String[] FILTERS = {
+        "vv.filter.all", "vv.filter.keep", "vv.filter.review", "vv.filter.redundant"
+    };
+    private static final String[] TABS = {
+        "vv.villagers", "vv.targets", "vv.regions", "vv.settings"
+    };
+
+    private final VerdictService s = VerdictService.INSTANCE;
+    private int page;
+    private boolean mobileDetailView;
+    private int offset, detailOffset, sort, filter;
+    private EditBox searchBox;
+    private boolean restoreSearch;
+    private int searchCursor;
+    private String query = "", regionId = "";
+    private boolean nearbyOnly;
+    private int refresh;
+    private int detailMax, lastClickY = -1, lastClickX;
+    private final List<Icon> icons = new ArrayList<>();
+    private final List<TargetIcon> targetIcons = new ArrayList<>();
+
+    private record Icon(ItemData item, int x, int y) {}
+
+    private record TargetIcon(ItemStack stack, int x, int y) {}
+
+    public VerdictScreen() {
+        super(Component.literal("Villager Verdict"));
     }
-    if (page == 0) {
-      int y = top() - 24;
-      int available = width - 24,
-          sw = available * 35 / 100 - 3,
-          sow = available * 23 / 100 - 3,
-          nw = available * 24 / 100 - 3;
-      var search = new EditBox(font, 12, y, sw, 20, Component.translatable("vv.search"));
-      search.setValue(query);
-      search.setHint(Component.translatable("vv.search"));
-      search.setResponder(
-          v -> {
+
+    private boolean isWide() {
+        return width >= 640;
+    }
+
+    private int listTop() {
+        if (page == 0 && !regionId.isEmpty() && !(!isWide() && mobileDetailView)) {
+            return 94;
+        }
+        return 74;
+    }
+
+    private int listWidth() {
+        return isWide() ? width / 2 - 16 : width - 24;
+    }
+
+    @Override
+    protected void init() {
+        int navTotal = width - 24;
+        int bw = (navTotal - 9) / 4;
+        for (int i = 0; i < TABS.length; i++) {
+            int p = i;
+            boolean active = i < 3 && page == i;
+            int bx = 12 + i * (bw + 3);
+            int w = i == 3 ? navTotal - 3 * (bw + 3) : bw;
+            Component label = active
+                ? Component.translatable(TABS[i]).withColor(0xFF55DD88)
+                : Component.translatable(TABS[i]);
+            button(label, bx, 24, w, () -> {
+                if (p == 3) {
+                    SettingsScreen.open(this);
+                } else {
+                    page = p;
+                    mobileDetailView = false;
+                    offset = detailOffset = 0;
+                    rebuildWidgets();
+                }
+            });
+        }
+
+        if (page == 0) {
+            if (!isWide() && mobileDetailView) {
+                initMobileDetailBar();
+            } else {
+                initVillagerList();
+                if (isWide()) initWideDetailButtons();
+            }
+        } else if (page == 1) {
+            initTargetsPage();
+        } else if (page == 2) {
+            initRegionsPage();
+        }
+
+        initBottomBar();
+    }
+
+    private void initVillagerList() {
+        int y = 49;
+        int available = width - 24;
+        int sw = available * 29 / 100 - 3;
+        int sow = available * 28 / 100 - 3;
+        int nw = available * 21 / 100 - 3;
+        int fw = available - sw - sow - nw - 12;
+
+        var search = new EditBox(font, 12, y, sw, 20, Component.translatable("vv.searchHint"));
+        search.setValue(query);
+        search.setHint(Component.translatable("vv.searchHint"));
+        search.setTooltip(Tooltip.create(Component.translatable("vv.search")));
+        search.setResponder(v -> {
             query = v;
             offset = 0;
-          });
-      addRenderableWidget(search);
-      searchBox = search;
-      if (restoreSearch) {
-        setFocused(search);
-        search.setCursorPosition(Math.min(searchCursor, query.length()));
-        restoreSearch = false;
-      }
-      button(
-          Component.translatable(SORTS[sort]),
-          12 + sw + 4,
-          y,
-          sow,
-          () -> {
-            sort = (sort + 1) % SORTS.length;
-            rebuildWidgets();
-          });
-      button(
-          Component.translatable(nearbyOnly ? "vv.nearby" : "vv.all"),
-          12 + sw + sow + 8,
-          y,
-          nw,
-          () -> {
-            nearbyOnly = !nearbyOnly;
-            regionId = "";
-            rebuildWidgets();
-          });
-      button(
-          Component.translatable("vv.filter", filter),
-          12 + sw + sow + nw + 12,
-          y,
-          available - sw - sow - nw - 12,
-          () -> {
-            filter = (filter + 1) % 4;
-            offset = 0;
-            rebuildWidgets();
-          });
-    }
-    if (page == 0) {
-      int rows = Math.max(1, (height - top() - 60) / 25);
-      var records = filtered();
-      offset = Math.clamp(offset, 0, Math.max(0, records.size() - rows));
-      for (int i = offset; i < Math.min(records.size(), offset + rows); i++) {
-        var v = records.get(i);
-        var verdict = viewAnalysis().verdicts().get(v.uuid());
-        String label =
-            s.displayStatus(v, verdict).symbol()
-                + " "
-                + profession(v)
-                + " L"
-                + v.level()
-                + " · "
-                + (int) Math.sqrt(s.distanceSquared(v))
-                + "m · "
-                + v.uuid().toString().substring(0, 6);
-        var b =
-            button(
-                Component.literal(label).withColor(color(v, verdict)),
-                12,
-                top() + (i - offset) * 25,
-                listWidth(),
-                () -> {
-                  s.selected = v.uuid();
-                  detailOffset = 0;
-                  if (width < 640) page = 1;
-                  rebuildWidgets();
-                });
-        b.setTooltip(
-            Tooltip.create(
-                Component.literal(
-                    v.uuid()
-                        + "\n"
-                        + v.x()
-                        + ", "
-                        + v.y()
-                        + ", "
-                        + v.z()
-                        + "\n"
-                        + (verdict == null ? "" : reason(verdict.reason())))));
-      }
-    }
-    if (page == 1 || page == 0 && width >= 640) {
-      int x = page == 0 ? width / 2 + 4 : 12;
-      int w = width - x - 12;
-      button(
-          Component.translatable("vv.edit"),
-          x,
-          height - 54,
-          Math.min(80, w / 3),
-          this::editSelected);
-      button(
-          Component.translatable("vv.navigate"),
-          x + Math.min(84, w / 3 + 4),
-          height - 54,
-          Math.min(80, w / 3),
-          () -> {
-            minecraft.gui.setScreen(null);
-          });
-      button(
-          Component.translatable("vv.next"),
-          x + Math.min(168, w * 2 / 3 + 8),
-          height - 54,
-          Math.min(80, w / 3 - 8),
-          () -> {
-            s.navigateNext();
-            rebuildWidgets();
-          });
-    }
-    if (page == 2) {
-      button(Component.translatable("vv.add"), 12, top() - 22, 90, () -> target(null, null));
-      button(
-          Component.literal(
-              currentRegion() == null
-                  ? Component.translatable("vv.all").getString()
-                  : currentRegion().name()),
-          110,
-          top() - 22,
-          Math.max(70, width - 122),
-          () -> {
-            var ids = new ArrayList<String>();
-            ids.add("");
-            s.regions.forEach(r -> ids.add(r.id()));
-            regionId = ids.get((ids.indexOf(regionId) + 1) % ids.size());
-            offset = 0;
-            rebuildWidgets();
-          });
-      targetRows();
-    }
-    if (page == 3) {
-      button(Component.translatable("vv.add"), 12, top() - 22, 90, () -> region(null));
-      int row = 0;
-      for (var r :
-          s.regions.stream().skip(offset).limit(Math.max(1, (height - top() - 60) / 25)).toList()) {
-        var result = s.regional.get(r.id());
-        button(
-            Component.literal(
-                    r.name()
-                        + " · "
-                        + (result == null
-                            ? ""
-                            : result.recommended().size() + " / " + result.verdicts().size()))
-                .withColor(r.color()),
-            12,
-            top() + row++ * 25,
-            width - 210,
-            () -> {
-              regionId = r.id();
-              page = 0;
-              offset = 0;
-              rebuildWidgets();
-            });
-        button(
-            Component.translatable("vv.targets"),
-            width - 192,
-            top() + (row - 1) * 25,
-            76,
-            () -> {
-              regionId = r.id();
-              page = 2;
-              offset = 0;
-              rebuildWidgets();
-            });
-        button(
-            Component.translatable("vv.edit"),
-            width - 112,
-            top() + (row - 1) * 25,
-            90,
-            () -> region(r));
-      }
-    }
-    button(
-        Component.translatable("vv.scan"),
-        12,
-        height - 26,
-        Math.min(76, width / 5),
-        () -> {
-          s.scan();
-          rebuildWidgets();
         });
-    button(
-        Component.translatable("vv.probe"),
-        94,
-        height - 26,
-        Math.min(76, width / 5),
-        SettingsScreen::toggleProbe);
-    button(
-        Component.translatable("vv.pause"),
-        176,
-        height - 26,
-        Math.min(65, width / 5),
-        () -> s.pause());
-    button(
-        Component.translatable("vv.off"),
-        247,
-        height - 26,
-        Math.min(55, width / 5),
-        () -> s.enable(false));
-    if (width > 370)
-      button(Component.translatable("gui.done"), width - 74, height - 26, 62, this::onClose);
-  }
+        addRenderableWidget(search);
+        searchBox = search;
+        if (restoreSearch) {
+            setFocused(search);
+            search.setCursorPosition(Math.min(searchCursor, query.length()));
+            restoreSearch = false;
+        }
 
-  private AnalysisResult viewAnalysis() {
-    return s.regional.getOrDefault(regionId, s.analysis);
-  }
+        Component sortText = Component.translatable(
+            "vv.sort.label", Component.translatable(SORTS[sort]).getString());
+        var sortBtn = button(
+            Component.literal(font.plainSubstrByWidth(sortText.getString(), sow - 8)),
+            12 + sw + 4, y, sow,
+            () -> {
+                sort = (sort + 1) % SORTS.length;
+                rebuildWidgets();
+            });
+        sortBtn.setTooltip(Tooltip.create(sortText));
 
-  private TradingHallRegion currentRegion() {
-    return s.regions.stream().filter(r -> r.id().equals(regionId)).findFirst().orElse(null);
-  }
+        Component scopeText = Component.translatable(nearbyOnly ? "vv.nearby" : "vv.all");
+        var scopeBtn = button(
+            Component.literal(font.plainSubstrByWidth(scopeText.getString(), nw - 8)),
+            12 + sw + sow + 8, y, nw,
+            () -> {
+                nearbyOnly = !nearbyOnly;
+                regionId = "";
+                offset = 0;
+                rebuildWidgets();
+            });
+        scopeBtn.setTooltip(Tooltip.create(scopeText));
 
-  private List<TargetTrade> currentTargets() {
-    var r = currentRegion();
-    return r == null ? s.targets : r.targets();
-  }
+        Component filterText = Component.translatable(FILTERS[filter]);
+        var filterBtn = button(
+            Component.literal(font.plainSubstrByWidth(filterText.getString(), fw - 8)),
+            12 + sw + sow + nw + 12, y, fw,
+            () -> {
+                filter = (filter + 1) % FILTERS.length;
+                offset = 0;
+                rebuildWidgets();
+            });
+        filterBtn.setTooltip(Tooltip.create(filterText));
 
-  private void updateTarget(String id, TargetTrade t) {
-    var list = new ArrayList<>(currentTargets());
-    list.removeIf(a -> a.id().equals(id));
-    if (t != null) list.add(t);
-    var r = currentRegion();
-    if (r == null) s.targets = list;
-    else {
-      var n =
-          new TradingHallRegion(
-              r.id(),
-              r.name(),
-              r.dimension(),
-              r.minX(),
-              r.minY(),
-              r.minZ(),
-              r.maxX(),
-              r.maxY(),
-              r.maxZ(),
-              list,
-              r.color());
-      s.regions.removeIf(a -> a.id().equals(r.id()));
-      s.regions.add(n);
+        if (!regionId.isEmpty()) {
+            button(
+                Component.translatable("vv.clearRegionFilter"),
+                width - 88, 72, 76,
+                () -> {
+                    regionId = "";
+                    offset = 0;
+                    rebuildWidgets();
+                });
+        }
+
+        int top = listTop();
+        int bottomReserve = isWide() ? 58 : 66;
+        int rows = Math.max(1, (height - top - bottomReserve) / 24);
+        var records = filtered();
+        offset = Math.clamp(offset, 0, Math.max(0, records.size() - rows));
+        int lw = listWidth();
+        for (int i = offset; i < Math.min(records.size(), offset + rows); i++) {
+            var v = records.get(i);
+            var verdict = viewAnalysis().verdicts().get(v.uuid());
+            boolean selectedRow = v.uuid().equals(s.selected);
+            String rowText = villagerRowLabel(v, verdict, selectedRow);
+            var b = button(
+                Component.literal(font.plainSubstrByWidth(rowText, lw - 12))
+                    .withColor(color(v, verdict)),
+                12,
+                top + (i - offset) * 24,
+                lw,
+                () -> {
+                    s.selected = v.uuid();
+                    detailOffset = 0;
+                    if (!isWide()) mobileDetailView = true;
+                    rebuildWidgets();
+                });
+            String statusLabel = Component.translatable(
+                ClientDisplayText.uiStatusKey(s.displayStatus(v, verdict))).getString();
+            String tip = statusLabel + " · (" + (int) v.x() + ", " + (int) v.y() + ", " + (int) v.z() + ")"
+                + (verdict == null ? "" : "\n" + reason(verdict.reason()));
+            b.setTooltip(Tooltip.create(Component.literal(tip)));
+        }
     }
-    s.changed();
-  }
 
-  private void targetRows() {
-    int row = 0;
-    for (var t :
-        currentTargets().stream()
-            .skip(offset)
-            .limit(Math.max(1, (height - top() - 60) / 25))
-            .toList())
-      button(
-          Component.literal(
-              t.item() + " " + t.enchantment() + " ≥" + t.minLevel() + " ×" + t.backups()),
-          12,
-          top() + row++ * 25,
-          width - 24,
-          () -> target(t, null));
-  }
+    private void initWideDetailButtons() {
+        int x = width / 2 + 4;
+        int w = width - x - 12;
+        int bw = (w - 8) / 3;
+        var editBtn = button(Component.translatable("vv.edit"), x, height - 54, bw, this::editSelected);
+        editBtn.setTooltip(Tooltip.create(Component.translatable("vv.edit.help")));
+        editBtn.active = s.record(s.selected) != null;
 
-  private Button button(Component text, int x, int y, int w, Runnable action) {
-    return addRenderableWidget(
-        Button.builder(text, b -> action.run()).bounds(x, y, Math.max(20, w), 20).build());
-  }
+        var navBtn = button(Component.translatable("vv.navigate"), x + bw + 4, height - 54, bw,
+            this::locateSelected);
+        navBtn.setTooltip(Tooltip.create(Component.translatable("vv.navigate.help")));
+        navBtn.active = s.record(s.selected) != null;
 
-  public void tick() {
-    if (++refresh % 20 == 0) {
-      restoreSearch = searchBox != null && searchBox.isFocused();
-      if (restoreSearch) searchCursor = searchBox.getCursorPosition();
-      rebuildWidgets();
+        var nextBtn = button(Component.translatable("vv.next"), x + 2 * (bw + 4), height - 54,
+            w - 2 * (bw + 4), () -> {
+                s.navigateNext();
+                detailOffset = 0;
+                rebuildWidgets();
+            });
+        nextBtn.setTooltip(Tooltip.create(Component.translatable("vv.next.help")));
     }
-  }
 
-  private int refresh;
+    private void initMobileDetailBar() {
+        int available = width - 24;
+        int backW = Math.min(82, available * 24 / 100);
+        int rest = available - backW - 12;
+        int bw = rest / 3;
 
-  private List<VillagerRecord> filtered() {
-    var list =
-        s.records().stream()
+        button(Component.translatable("vv.backToList"), 12, 49, backW, () -> {
+            mobileDetailView = false;
+            rebuildWidgets();
+        });
+
+        var editBtn = button(
+            Component.literal(font.plainSubstrByWidth(
+                Component.translatable("vv.edit").getString(), bw - 6)),
+            12 + backW + 4, 49, bw, this::editSelected);
+        editBtn.setTooltip(Tooltip.create(Component.translatable("vv.edit.help")));
+        editBtn.active = s.record(s.selected) != null;
+
+        var navBtn = button(
+            Component.literal(font.plainSubstrByWidth(
+                Component.translatable("vv.navigate").getString(), bw - 6)),
+            12 + backW + bw + 8, 49, bw, this::locateSelected);
+        navBtn.setTooltip(Tooltip.create(Component.translatable("vv.navigate.help")));
+        navBtn.active = s.record(s.selected) != null;
+
+        var nextBtn = button(
+            Component.literal(font.plainSubstrByWidth(
+                Component.translatable("vv.next").getString(), rest - 2 * bw - 6)),
+            12 + backW + 2 * bw + 12, 49, rest - 2 * bw,
+            () -> {
+                s.navigateNext();
+                detailOffset = 0;
+                rebuildWidgets();
+            });
+        nextBtn.setTooltip(Tooltip.create(Component.translatable("vv.next.help")));
+    }
+
+    private void initTargetsPage() {
+        button(Component.translatable("vv.add"), 12, 49, 80, () -> openTargetEditor(null));
+        String scopeName = currentRegion() == null
+            ? Component.translatable("vv.target.scopeGlobal").getString()
+            : Component.translatable("vv.target.scopeRegion", currentRegion().name()).getString();
+        button(
+            Component.translatable("vv.target.scope", scopeName),
+            98, 49, Math.max(80, width - 110),
+            () -> {
+                var ids = new ArrayList<String>();
+                ids.add("");
+                s.regions.forEach(r -> ids.add(r.id()));
+                regionId = ids.get((ids.indexOf(regionId) + 1) % ids.size());
+                offset = 0;
+                rebuildWidgets();
+            });
+
+        var targets = currentTargets();
+        int rows = Math.max(1, (height - 114) / 24);
+        offset = Math.clamp(offset, 0, Math.max(0, targets.size() - rows));
+        for (int i = offset; i < Math.min(targets.size(), offset + rows); i++) {
+            var t = targets.get(i);
+            int rowY = 76 + (i - offset) * 24;
+            String summary = ClientDisplayText.targetSummary(t);
+            button(
+                Component.literal(font.plainSubstrByWidth(summary, width - 58)),
+                34, rowY, width - 46,
+                () -> openTargetEditor(t));
+        }
+    }
+
+    private void initRegionsPage() {
+        button(Component.translatable("vv.add"), 12, 49, 80, () -> openRegionEditor(null));
+        int rows = Math.max(1, (height - 114) / 24);
+        offset = Math.clamp(offset, 0, Math.max(0, s.regions.size() - rows));
+        int act1 = 62;
+        int act2 = 62;
+        int act3 = 54;
+        int actionsTotal = act1 + act2 + act3 + 12;
+
+        for (int i = offset; i < Math.min(s.regions.size(), offset + rows); i++) {
+            var r = s.regions.get(i);
+            int rowY = 76 + (i - offset) * 24;
+            var result = s.regional.get(r.id());
+            String dimName = ClientDisplayText.dimensionDisplayName(r.dimension());
+            String label = result == null
+                ? r.name() + " · " + dimName
+                : Component.translatable("vv.regionSummary",
+                    r.name() + " (" + dimName + ")",
+                    result.recommended().size(),
+                    result.verdicts().size()).getString();
+            int mainW = Math.max(60, width - 24 - actionsTotal);
+            button(
+                Component.literal(font.plainSubstrByWidth(label, mainW - 10)).withColor(r.color()),
+                12, rowY, mainW,
+                () -> {
+                    regionId = r.id();
+                    page = 0;
+                    mobileDetailView = false;
+                    offset = 0;
+                    rebuildWidgets();
+                });
+
+            int rx = 12 + mainW + 4;
+            button(Component.translatable("vv.regionViewVillagers"), rx, rowY, act1, () -> {
+                regionId = r.id();
+                page = 0;
+                mobileDetailView = false;
+                offset = 0;
+                rebuildWidgets();
+            });
+            button(Component.translatable("vv.regionTargets"), rx + act1 + 4, rowY, act2, () -> {
+                regionId = r.id();
+                page = 1;
+                offset = 0;
+                rebuildWidgets();
+            });
+            button(Component.translatable("vv.regionEdit"), rx + act1 + act2 + 8, rowY, act3,
+                () -> openRegionEditor(r));
+        }
+    }
+
+    private void initBottomBar() {
+        int y = height - 26;
+        int doneW = 64;
+        int avail = width - 24 - doneW - 8;
+
+        int scanW = Math.min(92, Math.max(64, avail * 28 / 100));
+        var scanBtn = button(Component.translatable("vv.scan"), 12, y, scanW, () -> {
+            s.scan();
+            rebuildWidgets();
+        });
+        scanBtn.setTooltip(Tooltip.create(Component.translatable("vv.scan.help")));
+
+        boolean running = s.probe.running();
+        boolean autoStartOn = s.identity() != null
+            && s.settings.autoServers().getOrDefault(s.identity().server(), false);
+
+        int probeW = autoStartOn
+            ? Math.min(136, Math.max(82, avail - scanW - 76))
+            : Math.min(156, Math.max(88, avail - scanW - 4));
+        Component probeLabel = Component.translatable(running ? "vv.probeRunning" : "vv.probeStart")
+            .withColor(running ? 0xFF55DD88 : 0xFFFFFFFF);
+        var probeBtn = button(probeLabel, 12 + scanW + 4, y, probeW, () -> {
+            SettingsScreen.toggleProbe(ShortcutActions::show);
+            rebuildWidgets();
+        });
+        probeBtn.setTooltip(Tooltip.create(Component.translatable("vv.probe.help")));
+
+        if (autoStartOn) {
+            int offW = Math.min(82, Math.max(58, avail - scanW - probeW - 8));
+            var offBtn = button(Component.translatable("vv.probeAutoOff"),
+                12 + scanW + probeW + 8, y, offW, () -> {
+                    s.enable(false);
+                    rebuildWidgets();
+                });
+            offBtn.setTooltip(Tooltip.create(Component.translatable("vv.probeAutoOff.help")));
+        }
+
+        button(Component.translatable("gui.done"), width - doneW - 12, y, doneW, this::onClose);
+    }
+
+    private String villagerRowLabel(VillagerRecord v, Verdict verdict, boolean selectedRow) {
+        StringBuilder sb = new StringBuilder();
+        if (selectedRow) sb.append("▸ ");
+        sb.append(s.displayStatus(v, verdict).symbol())
+            .append(" ")
+            .append(profession(v))
+            .append(" Lv.")
+            .append(v.level())
+            .append(" · ")
+            .append((int) Math.sqrt(s.distanceSquared(v)))
+            .append("m");
+        if (v.snapshot() != null && !v.snapshot().trades().isEmpty()) {
+            var entries = ProfessionHighlights.select(v.profession(), v.snapshot().trades());
+            if (!entries.isEmpty()) {
+                String highlight = switch (entries.getFirst()) {
+                    case ProfessionHighlights.EnchantmentEntry ench ->
+                        ClientDisplayText.enchantmentDisplayName(ench.id())
+                            + (ench.level() > 1 ? " " + ench.level() : "");
+                    case ProfessionHighlights.ItemEntry prod ->
+                        ItemCodecAdapter.displayName(prod.item());
+                };
+                sb.append(" · ").append(highlight);
+            }
+        }
+        return sb.toString();
+    }
+
+    private void locateSelected() {
+        var r = s.record(s.selected);
+        if (r != null) {
+            ShortcutActions.show(Component.translatable(
+                "vv.feedback.locatedNav",
+                (int) r.x(), (int) r.y(), (int) r.z(),
+                (int) Math.sqrt(s.distanceSquared(r))));
+        }
+        minecraft.gui.setScreen(null);
+    }
+
+    private AnalysisResult viewAnalysis() {
+        return s.regional.getOrDefault(regionId, s.analysis);
+    }
+
+    private TradingHallRegion currentRegion() {
+        return s.regions.stream().filter(r -> r.id().equals(regionId)).findFirst().orElse(null);
+    }
+
+    private List<TargetTrade> currentTargets() {
+        var r = currentRegion();
+        return r == null ? s.targets : r.targets();
+    }
+
+    private void updateTarget(String id, TargetTrade t) {
+        var list = new ArrayList<>(currentTargets());
+        list.removeIf(a -> a.id().equals(id));
+        if (t != null) list.add(t);
+        var r = currentRegion();
+        if (r == null) {
+            s.targets = list;
+        } else {
+            var n = new TradingHallRegion(
+                r.id(), r.name(), r.dimension(),
+                r.minX(), r.minY(), r.minZ(), r.maxX(), r.maxY(), r.maxZ(),
+                list, r.color());
+            s.regions.removeIf(a -> a.id().equals(r.id()));
+            s.regions.add(n);
+        }
+        s.changed();
+    }
+
+    private Button button(Component text, int x, int y, int w, Runnable action) {
+        return addRenderableWidget(
+            Button.builder(text, b -> action.run()).bounds(x, y, Math.max(20, w), 20).build());
+    }
+
+    @Override
+    public void tick() {
+        if (++refresh % 20 == 0) {
+            restoreSearch = searchBox != null && searchBox.isFocused();
+            if (restoreSearch) searchCursor = searchBox.getCursorPosition();
+            rebuildWidgets();
+        }
+    }
+
+    private List<VillagerRecord> filtered() {
+        var list = s.records().stream()
             .filter(s::enabled)
             .filter(v -> !nearbyOnly || s.nearby.contains(v.uuid()))
-            .filter(
-                v ->
-                    regionId.isEmpty()
-                        || s.regions.stream()
-                            .filter(r -> r.id().equals(regionId))
-                            .anyMatch(r -> r.contains(v)))
-            .filter(
-                v ->
-                    filter == 0
-                        || viewAnalysis().verdicts().get(v.uuid()) != null
-                            && viewAnalysis().verdicts().get(v.uuid()).status().ordinal()
-                                == filter - 1)
+            .filter(v -> regionId.isEmpty()
+                || s.regions.stream()
+                    .filter(r -> r.id().equals(regionId))
+                    .anyMatch(r -> r.contains(v)))
+            .filter(v -> filter == 0
+                || viewAnalysis().verdicts().get(v.uuid()) != null
+                    && viewAnalysis().verdicts().get(v.uuid()).status().ordinal() == filter - 1)
             .filter(v -> search(v).contains(query.toLowerCase(Locale.ROOT)))
             .toList();
-    Comparator<VillagerRecord> order =
-        switch (sort) {
-          case 1 ->
-              Comparator.comparing(
-                      (VillagerRecord v) ->
-                          priceGroup(v))
-                  .thenComparing(
-                      (a, b) -> TradeComparison.vectorOrder(priceVector(a), priceVector(b)));
-          case 2 -> Comparator.<VillagerRecord>comparingInt(this::enchantment).reversed();
-          case 3 -> Comparator.comparingDouble(s::distanceSquared);
-          case 4 -> Comparator.comparing(VillagerRecord::profession);
-          default ->
-              Comparator.<VillagerRecord>comparingInt(v -> v.fixed() ? 0 : 1)
-                  .thenComparingInt(v -> viewAnalysis().recommended().contains(v.uuid()) ? 0 : 1)
-                  .thenComparing(
-                      Comparator.<VillagerRecord>comparingInt(
-                              v ->
-                                  viewAnalysis().verdicts().containsKey(v.uuid())
-                                      ? viewAnalysis().verdicts().get(v.uuid()).uniqueTrades()
-                                      : 0)
-                          .reversed())
-                  .thenComparing(
-                      Comparator.<VillagerRecord>comparingInt(
-                              v -> v.snapshot() == null ? 0 : v.snapshot().trades().size())
-                          .reversed());
-        };
-    return list.stream().sorted(order.thenComparing(v -> v.uuid().toString())).toList();
-  }
 
-  private String search(VillagerRecord v) {
-    return (profession(v)
+        Comparator<VillagerRecord> order = switch (sort) {
+            case 1 -> Comparator.comparing(this::priceGroup)
+                .thenComparing((a, b) -> TradeComparison.vectorOrder(priceVector(a), priceVector(b)));
+            case 2 -> Comparator.<VillagerRecord>comparingInt(this::enchantment).reversed();
+            case 3 -> Comparator.comparingDouble(s::distanceSquared);
+            case 4 -> Comparator.comparing(VillagerRecord::profession);
+            default -> Comparator.<VillagerRecord>comparingInt(v -> v.fixed() ? 0 : 1)
+                .thenComparingInt(v -> viewAnalysis().recommended().contains(v.uuid()) ? 0 : 1)
+                .thenComparing(Comparator.<VillagerRecord>comparingInt(
+                    v -> viewAnalysis().verdicts().containsKey(v.uuid())
+                        ? viewAnalysis().verdicts().get(v.uuid()).uniqueTrades()
+                        : 0).reversed())
+                .thenComparing(Comparator.<VillagerRecord>comparingInt(
+                    v -> v.snapshot() == null ? 0 : v.snapshot().trades().size()).reversed());
+        };
+        return list.stream().sorted(order.thenComparing(v -> v.uuid().toString())).toList();
+    }
+
+    private String search(VillagerRecord v) {
+        return (profession(v)
             + v.profession()
-            + v.uuid()
             + v.level()
             + v.note()
             + v.tags()
             + (v.snapshot() == null
                 ? ""
                 : v.snapshot().trades().stream()
-                    .map(
-                        t ->
-                            t.toString()
-                                + ItemCodecAdapter.displayName(t.output())
-                                + ItemCodecAdapter.enchantmentText(t.output()))
+                    .map(t -> t.toString()
+                        + ItemCodecAdapter.displayName(t.output())
+                        + ItemCodecAdapter.enchantmentText(t.output()))
                     .toList()))
-        .toLowerCase(Locale.ROOT);
-  }
+            .toLowerCase(Locale.ROOT);
+    }
 
-  private Map<String, Double> priceVector(VillagerRecord v) {
-    if (v.snapshot() == null) return Map.of();
-    String group = priceGroup(v);
-    return v.snapshot().trades().stream()
-        .filter(t -> new TreeSet<>(t.cost(false).keySet()).toString().equals(group))
-        .map(t -> t.cost(false))
-        .min(TradeComparison::vectorOrder)
-        .orElse(Map.of());
-  }
+    private Map<String, Double> priceVector(VillagerRecord v) {
+        if (v.snapshot() == null) return Map.of();
+        String group = priceGroup(v);
+        return v.snapshot().trades().stream()
+            .filter(t -> new TreeSet<>(t.cost(false).keySet()).toString().equals(group))
+            .map(t -> t.cost(false))
+            .min(TradeComparison::vectorOrder)
+            .orElse(Map.of());
+    }
 
-  private String priceGroup(VillagerRecord v) {
-    return v.snapshot() == null
-        ? "~"
-        : v.snapshot().trades().stream()
-            .map(t -> new TreeSet<>(t.cost(false).keySet()).toString())
-            .sorted()
-            .findFirst()
-            .orElse("~");
-  }
+    private String priceGroup(VillagerRecord v) {
+        return v.snapshot() == null
+            ? "~"
+            : v.snapshot().trades().stream()
+                .map(t -> new TreeSet<>(t.cost(false).keySet()).toString())
+                .sorted()
+                .findFirst()
+                .orElse("~");
+    }
 
-  private int enchantment(VillagerRecord v) {
-    return v.snapshot() == null
-        ? 0
-        : v.snapshot().trades().stream()
-            .flatMap(t -> t.output().enchantments().values().stream())
-            .mapToInt(i -> i)
-            .max()
-            .orElse(0);
-  }
+    private int enchantment(VillagerRecord v) {
+        return v.snapshot() == null
+            ? 0
+            : v.snapshot().trades().stream()
+                .flatMap(t -> t.output().enchantments().values().stream())
+                .mapToInt(i -> i)
+                .max()
+                .orElse(0);
+    }
 
-  private String profession(VillagerRecord v) {
-    return v.baby()
-        ? Component.translatable("vv.baby").getString()
-        : Component.translatable(
+    private String profession(VillagerRecord v) {
+        return v.baby()
+            ? Component.translatable("vv.baby").getString()
+            : Component.translatable(
                 "entity.minecraft.villager."
                     + v.profession().substring(v.profession().indexOf(':') + 1))
-            .getString();
-  }
+                .getString();
+    }
 
-  private int color(VillagerRecord record, Verdict verdict) {
-    return switch (s.displayStatus(record, verdict)) {
-      case KEEP -> s.settings.green();
-      case REDUNDANT -> s.settings.red();
-      default -> s.settings.yellow();
-    };
-  }
+    private int color(VillagerRecord record, Verdict verdict) {
+        return switch (s.displayStatus(record, verdict)) {
+            case KEEP -> s.settings.green();
+            case REDUNDANT -> s.settings.red();
+            default -> s.settings.yellow();
+        };
+    }
 
-  public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float delta) {
-    g.centeredText(font, title, width / 2, 8, 0xFFFFFFFF);
-    icons.clear();
-    if (page == 0) {
-      if (width >= 640) details(g, width / 2 + 4, top(), width / 2 - 16, height - top() - 62);
-      var st = s.stats();
-      String text =
-          Component.translatable(
-                  "vv.stats",
-                  st.get("success"),
-                  st.get("pending"),
-                  st.get("failed"),
-                  st.get("active"),
-                  st.get("nontrading"))
-              .getString();
-      String visible = font.plainSubstrByWidth(text, width - 24);
-      g.fill(10, height - 54, 14 + font.width(visible), height - 41, 0x99303A50);
-      g.text(font, visible, 12, height - 52, 0xFFBBD0E8);
-    }
-    if (page == 1) details(g, 12, top() - 20, width - 24, height - top() - 42);
-    super.extractRenderState(g, mx, my, delta);
-    for (var i : icons) {
-      var stack = ItemCodecAdapter.decode(i.item);
-      g.item(stack, i.x, i.y);
-      g.itemDecorations(font, stack, i.x, i.y);
-      if (mx >= i.x && mx < i.x + 16 && my >= i.y && my < i.y + 16)
-        g.setTooltipForNextFrame(font, stack, mx, my);
-    }
-    if (!s.error.isEmpty())
-      g.text(font, font.plainSubstrByWidth(s.error, width - 24), 12, height - 66, 0xFFFF6677);
-  }
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float delta) {
+        g.centeredText(font, title, width / 2, 8, 0xFFFFFFFF);
 
-  private void details(GuiGraphicsExtractor g, int x, int y, int w, int h) {
-    var v = s.record(s.selected);
-    g.enableScissor(x, y, x + w, y + h);
-    g.fill(x, y, x + w, y + h, 0x99303A50);
-    if (v == null || !s.enabled(v)) {
-      g.text(font, Component.translatable("vv.select"), x + 6, y + 6, 0xFFFFFFFF);
-      g.disableScissor();
-      return;
-    }
-    var lines = new ArrayList<String>();
-    lines.add(
-        profession(v)
-            + " · L"
-            + v.level()
-            + " · "
-            + Component.translatable("vv.manual." + v.manual()).getString());
-    lines.add(v.uuid().toString());
-    lines.add(
-        (int) v.x()
-            + ", "
-            + (int) v.y()
-            + ", "
-            + (int) v.z()
-            + " · "
-            + Component.translatable(s.isLoaded(v.uuid()) ? "vv.loaded" : "vv.unloaded")
-                .getString());
-    lines.add(
-        Component.translatable(
-                "vv.lastSeen", java.time.Instant.ofEpochMilli(v.lastSeen()).toString())
-            .getString());
-    lines.add(v.note() + " " + v.tags());
-    var verdict = viewAnalysis().verdicts().get(v.uuid());
-    if (verdict == null) lines.add(Component.translatable(s.displayStatus(v, null).translationKey()).getString());
-    if (verdict != null) {
-      lines.add(
-          Component.translatable(s.displayStatus(v, verdict).translationKey())
-                  .getString()
-              + " · "
-              + Component.translatable("vv.confidence." + verdict.confidence()).getString());
-      lines.add(reason(verdict.reason()));
-    }
-    var snap = v.snapshot();
-    if (snap == null) lines.add(Component.translatable("vv.uninspected").getString());
-    else {
-      lines.add(
-          Component.translatable("vv.complete." + snap.completeness()).getString()
-              + " · "
-              + java.time.Instant.ofEpochMilli(snap.checkedAt()));
-      if (snap.stale(System.currentTimeMillis(), s.settings.cacheMillis()))
-        lines.add(Component.translatable("vv.stale").getString());
-    }
-    int yy = y + 6 - detailOffset;
-    for (String l : lines) {
-      for (var wrapped : font.split(Component.literal(l), Math.max(24, w - 14))) {
-        g.text(font, wrapped, x + 6, yy, 0xFFCCDAED);
-        yy += 12;
-      }
-    }
-    if (snap != null)
-      for (var t : snap.trades()) {
-        if (yy >= y && yy + 18 < y + h) {
-          icons.add(new Icon(t.actualInput(), x + 6, yy));
-          if (t.secondInput() != null) icons.add(new Icon(t.secondInput(), x + 28, yy));
-          icons.add(new Icon(t.output(), x + 64, yy));
+        // Highlight active top tab cleanly with a bottom accent line.
+        int navTotal = width - 24;
+        int bw = (navTotal - 9) / 4;
+        if (page >= 0 && page < 3) {
+            int bx = 12 + page * (bw + 3);
+            g.fill(bx + 4, 44, bx + bw - 4, 46, 0xFF55DD88);
         }
-        g.text(font, "→", x + 50, yy + 3, 0xFFFFFFFF);
-        yy += 20;
-        String text =
-            t.baseInput().count()
-                + " → "
-                + t.actualInput().count()
-                + " ("
-                + Component.translatable("vv.baseActual").getString()
-                + ") · "
-                + ItemCodecAdapter.displayName(t.output())
-                + " ×"
-                + t.output().count()
-                + " · "
-                + (t.maxUses() - t.uses())
-                + "/"
-                + t.maxUses();
-        for (var wrapped :
-            font.split(
-                Component.literal(
-                    text
-                        + (t.secondInput() == null
-                            ? ""
-                            : " + "
-                                + ItemCodecAdapter.displayName(t.secondInput())
-                                + " ×"
-                                + t.secondInput().count())
-                        + " "
-                        + ItemCodecAdapter.enchantmentText(t.output())),
-                Math.max(24, w - 14))) {
-          g.text(font, wrapped, x + 6, yy, 0xFFFFFFFF);
-          yy += 12;
-        }
-      }
-    if (verdict != null)
-      for (var r : verdict.replacements()) {
-        String text =
-            "↪ "
-                + r.replacement().toString().substring(0, 8)
-                + " ("
-                + (int) r.x()
-                + ","
-                + (int) r.y()
-                + ","
-                + (int) r.z()
-                + ") "
-                + ItemCodecAdapter.displayName(r.original().output())
-                + " Δbase="
-                + difference(r.baseDifference())
-                + " Δnow="
-                + difference(r.actualDifference())
-                + " "
-                + (s.canConfirm(r)
-                    ? Component.translatable("vv.confirmed").getString()
-                    : Component.translatable("vv.cached").getString());
-        int begin = yy;
-        for (var wrapped : font.split(Component.literal(text), Math.max(24, w - 14))) {
-          g.text(font, wrapped, x + 6, yy, 0xFFAA99FF);
-          yy += 12;
-        }
-        if (lastClickY >= begin && lastClickY < yy && lastClickX >= x && lastClickX < x + w) {
-          s.selected = r.replacement();
-          detailOffset = 0;
-          lastClickY = -1;
-        }
-      }
-    for (var gap : viewAnalysis().gaps()) {
-      for (var wrapped :
-          font.split(
-              Component.literal(
-                  Component.translatable("vv.gap").getString()
-                      + ": "
-                      + gap.replace(
-                          "price condition unmet",
-                          Component.translatable("vv.priceUnmet").getString())),
-              Math.max(24, w - 14))) {
-        g.text(font, wrapped, x + 6, yy, 0xFFFFCC55);
-        yy += 12;
-      }
-    }
-    g.disableScissor();
-    detailMax = Math.max(0, yy + detailOffset - y - h + 12);
-  }
 
-  private String reason(String value) {
-    String text =
-        value
-            .replace(
-                "manual protection / keep", Component.translatable("vv.reason.manual").getString())
-            .replace(
-                "coverage / unique value", Component.translatable("vv.reason.coverage").getString())
-            .replace(
-                "all known trades have replacements",
-                Component.translatable("vv.reason.redundant").getString())
-            .replace(
-                "stale, unavailable replacement or coverage gap",
-                Component.translatable("vv.reason.review").getString())
-            .replace(
-                "uninspected or completeness unknown",
-                Component.translatable("vv.reason.uninspected").getString())
+        icons.clear();
+        targetIcons.clear();
+
+        if (page == 0) {
+            if (!regionId.isEmpty() && !(!isWide() && mobileDetailView) && currentRegion() != null) {
+                g.fill(12, 72, width - 92, 92, 0xA8233044);
+                g.text(font, font.plainSubstrByWidth(
+                    Component.translatable("vv.regionFilterBanner", currentRegion().name()).getString(),
+                    width - 114),
+                    18, 78, currentRegion().color() | 0xFF000000);
+            }
+            if (isWide()) {
+                int panelTop = listTop();
+                details(g, width / 2 + 4, panelTop, width / 2 - 16, height - panelTop - 62);
+            } else if (mobileDetailView) {
+                details(g, 12, 74, width - 24, height - 108);
+            } else if (filtered().isEmpty()) {
+                ClientDisplayText.drawPanel(g, 12, listTop(), width - 24, 68);
+                int ey = listTop() + 10;
+                for (var line : font.split(Component.translatable("vv.emptyVillagers"), width - 40)) {
+                    g.text(font, line, 20, ey, 0xFF9FB8D8);
+                    ey += 11;
+                }
+            }
+            if (isWide() && filtered().isEmpty()) {
+                int top = listTop();
+                ClientDisplayText.drawPanel(g, 12, top, listWidth(), 72);
+                int ey = top + 10;
+                for (var line : font.split(Component.translatable("vv.emptyVillagers"), listWidth() - 16)) {
+                    g.text(font, line, 20, ey, 0xFF9FB8D8);
+                    ey += 11;
+                }
+            }
+            if (!(!isWide() && mobileDetailView)) {
+                var st = s.stats();
+                String statsText = Component.translatable(
+                    "vv.stats",
+                    st.get("success"),
+                    st.get("pending"),
+                    st.get("failed")).getString();
+                if (st.getOrDefault("active", 0L) > 0L) {
+                    statsText += Component.translatable("vv.statsReading").getString();
+                }
+                String visible = font.plainSubstrByWidth(statsText, width - 24);
+                int statsY = height - 42;
+                g.fill(10, statsY - 2, 16 + font.width(visible), statsY + 11, 0xA81D2534);
+                g.text(font, visible, 13, statsY, 0xFFBBD0E8);
+            }
+        } else if (page == 1) {
+            var targets = currentTargets();
+            if (targets.isEmpty()) {
+                ClientDisplayText.drawPanel(g, 12, 76, width - 24, 68);
+                int ey = 86;
+                for (var line : font.split(Component.translatable("vv.emptyTargets"), width - 40)) {
+                    g.text(font, line, 20, ey, 0xFFBBD0E8);
+                    ey += 11;
+                }
+            } else {
+                int rows = Math.max(1, (height - 114) / 24);
+                for (int i = offset; i < Math.min(targets.size(), offset + rows); i++) {
+                    ItemStack stack = ClientDisplayText.itemStack(targets.get(i).item());
+                    if (!stack.isEmpty()) {
+                        targetIcons.add(new TargetIcon(stack, 14, 78 + (i - offset) * 24));
+                    }
+                }
+            }
+        } else if (page == 2) {
+            if (s.regions.isEmpty()) {
+                ClientDisplayText.drawPanel(g, 12, 76, width - 24, 64);
+                int ey = 86;
+                for (var line : font.split(Component.translatable("vv.emptyRegions"), width - 40)) {
+                    g.text(font, line, 20, ey, 0xFFBBD0E8);
+                    ey += 11;
+                }
+            }
+        }
+
+        super.extractRenderState(g, mx, my, delta);
+
+        for (var i : icons) {
+            var stack = ItemCodecAdapter.decode(i.item);
+            g.item(stack, i.x, i.y);
+            g.itemDecorations(font, stack, i.x, i.y);
+            if (mx >= i.x && mx < i.x + 16 && my >= i.y && my < i.y + 16) {
+                g.setTooltipForNextFrame(font, stack, mx, my);
+            }
+        }
+        for (var ti : targetIcons) {
+            g.item(ti.stack(), ti.x(), ti.y());
+        }
+        if (!s.error.isEmpty()) {
+            g.text(font, font.plainSubstrByWidth(s.error, width - 24), 12, height - 56, 0xFFFF6677);
+        }
+    }
+
+    private void details(GuiGraphicsExtractor g, int x, int y, int w, int h) {
+        var v = s.record(s.selected);
+        g.enableScissor(x, y, x + w, y + h);
+        ClientDisplayText.drawPanel(g, x, y, w, h);
+        if (v == null || !s.enabled(v)) {
+            int sy = y + 10;
+            for (var line : font.split(Component.translatable("vv.select"), Math.max(40, w - 16))) {
+                g.text(font, line, x + 8, sy, 0xFFBBD0E8);
+                sy += 12;
+            }
+            g.disableScissor();
+            detailMax = 0;
+            return;
+        }
+
+        int yy = y + 8 - detailOffset;
+        int innerW = Math.max(24, w - 16);
+
+        // 1. Header: profession, level, manual decision mode
+        String header = profession(v) + " · Lv." + v.level() + " · "
+            + Component.translatable("vv.manual." + v.manual()).getString();
+        yy = drawWrappedLine(g, header, x + 8, yy, innerW, 0xFFFFFFFF);
+
+        // 2. Position, load status, and relative last-seen time (no raw UUID or ISO UTC!)
+        String locLine = "(" + (int) v.x() + ", " + (int) v.y() + ", " + (int) v.z() + ") · "
+            + Component.translatable(s.isLoaded(v.uuid()) ? "vv.loaded" : "vv.unloaded").getString()
+            + " · " + Component.translatable(
+                "vv.lastSeen", ClientDisplayText.relativeTimeText(v.lastSeen())).getString();
+        yy = drawWrappedLine(g, locLine, x + 8, yy, innerW, 0xFF9FB8D8);
+
+        // 3. Notes & tags (shown ONLY when non-empty; never render [])
+        if (!v.note().isBlank()) {
+            yy = drawWrappedLine(g,
+                Component.translatable("vv.note").getString() + "：" + v.note(),
+                x + 8, yy, innerW, 0xFFE6EDF7);
+        }
+        if (!v.tags().isEmpty()) {
+            yy = drawWrappedLine(g,
+                String.join(", ", v.tags()),
+                x + 8, yy, innerW, 0xFF8CA4C4);
+        }
+
+        // 4. Verdict & plain-language reasoning
+        yy += 2;
+        var verdict = viewAnalysis().verdicts().get(v.uuid());
+        var displayStatus = s.displayStatus(v, verdict);
+        int statusColor = color(v, verdict);
+        String statusText = Component.translatable(ClientDisplayText.uiStatusKey(displayStatus)).getString();
+        yy = drawWrappedLine(g, "● " + statusText, x + 8, yy, innerW, statusColor);
+
+        if (verdict != null) {
+            yy = drawWrappedLine(g, reason(verdict.reason()), x + 8, yy, innerW, 0xFFE6EDF7);
+            yy = drawWrappedLine(g,
+                Component.translatable("vv.confidence." + verdict.confidence()).getString(),
+                x + 8, yy, innerW, 0xFF9FB8D8);
+        }
+
+        var snap = v.snapshot();
+        if (snap == null) {
+            yy = drawWrappedLine(g, Component.translatable("vv.uninspected").getString(),
+                x + 8, yy, innerW, 0xFFFFCC55);
+        } else {
+            String syncText = Component.translatable("vv.complete." + snap.completeness()).getString()
+                + " · " + Component.translatable(
+                    "vv.syncedAt", ClientDisplayText.relativeTimeText(snap.checkedAt())).getString();
+            yy = drawWrappedLine(g, syncText, x + 8, yy, innerW, 0xFF9FB8D8);
+            if (snap.stale(System.currentTimeMillis(), s.settings.cacheMillis())) {
+                yy = drawWrappedLine(g, Component.translatable("vv.stale").getString(),
+                    x + 8, yy, innerW, 0xFFFFCC55);
+            }
+        }
+
+        // 5. Trades with icons & plain pricing
+        if (snap != null) {
+            yy += 3;
+            for (var t : snap.trades()) {
+                if (yy >= y && yy + 18 < y + h) {
+                    icons.add(new Icon(t.actualInput(), x + 8, yy));
+                    if (t.secondInput() != null) icons.add(new Icon(t.secondInput(), x + 28, yy));
+                    icons.add(new Icon(t.output(), x + (t.secondInput() == null ? 44 : 64), yy));
+                }
+                g.text(font, "→", x + (t.secondInput() == null ? 29 : 49), yy + 4, 0xFF9FB8D8);
+                yy += 20;
+
+                String costNow = t.actualInput().count() + " " + ItemCodecAdapter.displayName(t.actualInput());
+                if (t.secondInput() != null) {
+                    costNow += " + " + t.secondInput().count() + " " + ItemCodecAdapter.displayName(t.secondInput());
+                }
+                String outName = ItemCodecAdapter.displayName(t.output());
+                String ench = ItemCodecAdapter.enchantmentText(t.output());
+                if (!ench.isEmpty()) outName += " (" + ench + ")";
+
+                String tradeLine = t.actualInput().count() < t.baseInput().count()
+                    ? Component.translatable("vv.tradeLineDiscount",
+                        costNow,
+                        t.baseInput().count(),
+                        outName,
+                        t.output().count(),
+                        t.maxUses() - t.uses(),
+                        t.maxUses()).getString()
+                    : Component.translatable("vv.tradeLineNormal",
+                        costNow,
+                        outName,
+                        t.output().count(),
+                        t.maxUses() - t.uses(),
+                        t.maxUses()).getString();
+                yy = drawWrappedLine(g, tradeLine, x + 8, yy, innerW, 0xFFFFFFFF);
+            }
+        }
+
+        // 6. Replacement suggestions (clickable!)
+        if (verdict != null && !verdict.replacements().isEmpty()) {
+            yy += 3;
+            for (var r : verdict.replacements()) {
+                String deltaSummary = summarizePriceDelta(r);
+                String confirmText = Component.translatable(
+                    s.canConfirm(r) ? "vv.confirmed" : "vv.cached").getString();
+                String repText = Component.translatable("vv.replacement.line",
+                    (int) r.x(), (int) r.y(), (int) r.z(), deltaSummary, confirmText).getString();
+                int begin = yy;
+                yy = drawWrappedLine(g, repText, x + 8, yy, innerW, 0xFFB8A8FF);
+                if (lastClickY >= begin && lastClickY < yy && lastClickX >= x && lastClickX < x + w) {
+                    s.selected = r.replacement();
+                    detailOffset = 0;
+                    lastClickY = -1;
+                }
+            }
+        }
+
+        // 7. Unmet gaps translated cleanly
+        for (var gap : viewAnalysis().gaps()) {
+            String msg = Component.translatable("vv.gap").getString()
+                + ": " + ClientDisplayText.formatGap(gap);
+            yy = drawWrappedLine(g, msg, x + 8, yy, innerW, 0xFFFFCC55);
+        }
+
+        g.disableScissor();
+        detailMax = Math.max(0, yy + detailOffset - y - h + 10);
+    }
+
+    private int drawWrappedLine(GuiGraphicsExtractor g, String text, int x, int y, int maxW, int color) {
+        for (var wrapped : font.split(Component.literal(text), maxW)) {
+            g.text(font, wrapped, x, y, color);
+            y += 12;
+        }
+        return y;
+    }
+
+    private String summarizePriceDelta(ComparisonResult r) {
+        if (r.actualDifference().isEmpty()) {
+            return Component.translatable("vv.replacement.samePrice").getString();
+        }
+        double sum = r.actualDifference().values().stream().mapToDouble(Double::doubleValue).sum();
+        if (Math.abs(sum) < 0.01) {
+            return Component.translatable("vv.replacement.samePrice").getString();
+        }
+        String formatted = UiFormatting.formatDecimal(Math.abs(sum));
+        return sum < 0
+            ? Component.translatable("vv.replacement.cheaper", formatted).getString()
+            : Component.translatable("vv.replacement.pricier", formatted).getString();
+    }
+
+    private String reason(String value) {
+        return value
+            .replace("manual protection / keep", Component.translatable("vv.reason.manual").getString())
+            .replace("coverage / unique value", Component.translatable("vv.reason.coverage").getString())
+            .replace("all known trades have replacements", Component.translatable("vv.reason.redundant").getString())
+            .replace("stale, unavailable replacement or coverage gap", Component.translatable("vv.reason.review").getString())
+            .replace("uninspected or completeness unknown", Component.translatable("vv.reason.uninspected").getString())
             .replace("cached trades expired", Component.translatable("vv.reason.stale").getString())
             .replace("known trades lack retained replacements", Component.translatable("vv.reason.gap").getString())
             .replace("replacement unloaded or expired", Component.translatable("vv.reason.unavailable").getString())
-            .replace(
-                "unknown future trades", Component.translatable("vv.reason.unknown").getString())
+            .replace("unknown future trades", Component.translatable("vv.reason.unknown").getString())
             .replace("manual exclusion", Component.translatable("vv.reason.excluded").getString());
-    return text;
-  }
-
-  private String difference(Map<String, Double> values) {
-    return values.entrySet().stream()
-        .map(
-            e ->
-                e.getKey().split("\\|", 2)[0]
-                    + " "
-                    + String.format(Locale.ROOT, "%+.2f", e.getValue()))
-        .collect(java.util.stream.Collectors.joining(", "));
-  }
-
-  private int detailMax, lastClickY = -1, lastClickX;
-
-  public boolean mouseClicked(MouseButtonEvent e, boolean doubleClick) {
-    if (super.mouseClicked(e, doubleClick)) return true;
-    lastClickX = (int) e.x();
-    lastClickY = (int) e.y();
-    return true;
-  }
-
-  public boolean mouseScrolled(double x, double y, double a, double b) {
-    if (page == 1 || page == 0 && width >= 640 && x > width / 2) {
-      detailOffset = Math.clamp(detailOffset - (int) (b * 24), 0, detailMax);
-    } else {
-      offset = Math.max(0, offset - (int) Math.signum(b));
-      rebuildWidgets();
     }
-    return true;
-  }
 
-  private void editSelected() {
-    var v = s.record(s.selected);
-    if (v == null) return;
-    minecraft.gui.setScreen(
-        new FormScreen(
-            this,
-            "vv.edit",
-            fields(
-                "vv.manual",
-                v.manual().name(),
-                "vv.note",
-                v.note(),
-                "vv.tags",
-                String.join(",", v.tags())),
-            m -> {
-              var tags = new HashSet<>(Arrays.asList(m.get("vv.tags").split(",")));
-              tags.remove("");
-              s.edit(
-                  v.withManual(
-                      VillagerRecord.Manual.valueOf(m.get("vv.manual").toUpperCase(Locale.ROOT)),
-                      m.get("vv.note"),
-                      tags));
-            },
-            null));
-  }
+    @Override
+    public boolean mouseClicked(MouseButtonEvent e, boolean doubleClick) {
+        if (super.mouseClicked(e, doubleClick)) return true;
+        lastClickX = (int) e.x();
+        lastClickY = (int) e.y();
+        return true;
+    }
 
-  private void target(TargetTrade t, TradingHallRegion region) {
-    String id = t == null ? UUID.randomUUID().toString() : t.id();
-    minecraft.gui.setScreen(
-        new FormScreen(
-            this,
-            "vv.targets",
-            fields(
-                "vv.item",
-                t == null ? "minecraft:enchanted_book" : t.item(),
-                "vv.enchantmentId",
-                t == null ? "" : t.enchantment(),
-                "vv.minLevel",
-                t == null ? "1" : "" + t.minLevel(),
-                "vv.maxPrice",
-                t == null ? "0" : "" + t.maxUnitPrice(),
-                "vv.backups",
-                t == null ? "1" : "" + t.backups()),
-            m -> {
-              var n =
-                  new TargetTrade(
-                      id,
-                      m.get("vv.item"),
-                      m.get("vv.enchantmentId"),
-                      Integer.parseInt(m.get("vv.minLevel")),
-                      Double.parseDouble(m.get("vv.maxPrice")),
-                      Integer.parseInt(m.get("vv.backups")));
-              updateTarget(id, n);
-            },
-            t == null
-                ? null
-                : () -> {
-                  updateTarget(id, null);
-                }));
-  }
+    @Override
+    public boolean mouseScrolled(double x, double y, double a, double b) {
+        boolean onDetails = (page == 0 && !isWide() && mobileDetailView)
+            || (page == 0 && isWide() && x > width / 2.0);
+        if (onDetails) {
+            detailOffset = Math.clamp(detailOffset - (int) (b * 24), 0, detailMax);
+        } else {
+            offset = Math.max(0, offset - (int) Math.signum(b));
+            rebuildWidgets();
+        }
+        return true;
+    }
 
-  private void region(TradingHallRegion r) {
-    String id = r == null ? UUID.randomUUID().toString() : r.id();
-    var p = minecraft.player;
-    String dim = s.identity() == null ? "minecraft:overworld" : s.identity().dimension();
-    var f =
-        fields(
-            "vv.name",
-            r == null ? "Trading Hall" : r.name(),
-            "vv.dimension",
-            r == null ? dim : r.dimension(),
-            "vv.minX",
-            "" + (r == null ? (int) (p == null ? 0 : p.getX()) - 8 : r.minX()),
-            "vv.minY",
-            "" + (r == null ? (int) (p == null ? 0 : p.getY()) - 4 : r.minY()),
-            "vv.minZ",
-            "" + (r == null ? (int) (p == null ? 0 : p.getZ()) - 8 : r.minZ()),
-            "vv.maxX",
-            "" + (r == null ? (int) (p == null ? 0 : p.getX()) + 8 : r.maxX()),
-            "vv.maxY",
-            "" + (r == null ? (int) (p == null ? 0 : p.getY()) + 8 : r.maxY()),
-            "vv.maxZ",
-            "" + (r == null ? (int) (p == null ? 0 : p.getZ()) + 8 : r.maxZ()),
-            "vv.regionColor",
-            Integer.toHexString(r == null ? 0xFF99AAFF : r.color()));
-    minecraft.gui.setScreen(
-        new FormScreen(
+    private void editSelected() {
+        var v = s.record(s.selected);
+        if (v == null) return;
+        minecraft.gui.setScreen(new VillagerEditScreen(this, v, updated -> s.edit(updated)));
+    }
+
+    private void openTargetEditor(TargetTrade t) {
+        minecraft.gui.setScreen(new TargetEditorScreen(
             this,
-            "vv.regions",
-            f,
-            m -> {
-              var n =
-                  new TradingHallRegion(
-                      id,
-                      m.get("vv.name"),
-                      m.get("vv.dimension"),
-                      Double.parseDouble(m.get("vv.minX")),
-                      Double.parseDouble(m.get("vv.minY")),
-                      Double.parseDouble(m.get("vv.minZ")),
-                      Double.parseDouble(m.get("vv.maxX")),
-                      Double.parseDouble(m.get("vv.maxY")),
-                      Double.parseDouble(m.get("vv.maxZ")),
-                      r == null ? List.of() : r.targets(),
-                      (int) Long.parseLong(m.get("vv.regionColor"), 16));
-              s.regions.removeIf(a -> a.id().equals(id));
-              s.regions.add(n);
-              s.changed();
+            t,
+            saved -> updateTarget(saved.id(), saved),
+            t == null ? null : () -> updateTarget(t.id(), null)));
+    }
+
+    private void openRegionEditor(TradingHallRegion r) {
+        String dim = s.identity() == null ? "minecraft:overworld" : s.identity().dimension();
+        minecraft.gui.setScreen(new RegionEditorScreen(
+            this,
+            r,
+            dim,
+            saved -> {
+                s.regions.removeIf(a -> a.id().equals(saved.id()));
+                s.regions.add(saved);
+                s.changed();
             },
             r == null
                 ? null
                 : () -> {
-                  s.regions.removeIf(a -> a.id().equals(id));
-                  regionId = "";
-                  s.changed();
+                    s.regions.removeIf(a -> a.id().equals(r.id()));
+                    if (r.id().equals(regionId)) regionId = "";
+                    s.changed();
                 }));
-  }
-
-  public boolean keyPressed(net.minecraft.client.input.KeyEvent e) {
-    if (e.key() == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEDOWN
-        || e.key() == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEUP) {
-      return mouseScrolled(
-          page == 1 ? width : 0,
-          top(),
-          0,
-          e.key() == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEDOWN ? -5 : 5);
     }
-    return super.keyPressed(e);
-  }
+
+    @Override
+    public boolean keyPressed(KeyEvent e) {
+        if (e.key() == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEDOWN
+                || e.key() == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEUP) {
+            return mouseScrolled(
+                !isWide() && mobileDetailView ? 0 : width,
+                listTop(),
+                0,
+                e.key() == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEDOWN ? -5 : 5);
+        }
+        return super.keyPressed(e);
+    }
 }

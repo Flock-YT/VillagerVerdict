@@ -80,6 +80,7 @@ public final class VillagerverdictClient implements ClientModInitializer {
         VanillaHudElements.CHAT,
         Identifier.fromNamespaceAndPath("villagerverdict", "navigation"),
         (g, dt) -> {
+          if (net.minecraft.client.Minecraft.getInstance().gui.screen() instanceof WorldScreen) return;
           var r = s.record(s.selected);
           if (r != null && s.settings.markers()) {
             g.text(
@@ -97,7 +98,7 @@ public final class VillagerverdictClient implements ClientModInitializer {
               g.text(
                   net.minecraft.client.Minecraft.getInstance().font,
                   net.minecraft.network.chat.Component.translatable(
-                      "vv.lastSeen", java.time.Instant.ofEpochMilli(r.lastSeen()).toString()),
+                      "vv.lastSeen", ClientDisplayText.relativeTimeText(r.lastSeen())),
                   8,
                   20,
                   0xFFFFCC55);

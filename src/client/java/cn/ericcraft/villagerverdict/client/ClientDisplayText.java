@@ -1,0 +1,132 @@
+package cn.ericcraft.villagerverdict.client;
+
+import cn.ericcraft.villagerverdict.model.DisplayStatus;
+import cn.ericcraft.villagerverdict.model.TargetTrade;
+import cn.ericcraft.villagerverdict.model.UiFormatting;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+
+/** Localized human-friendly presentation helpers for management screens. */
+public final class ClientDisplayText {
+    private static final DateTimeFormatter LOCAL_TIME =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT).withZone(ZoneId.systemDefault());
+
+    private ClientDisplayText() {}
+
+    public static void drawPanel(GuiGraphicsExtractor g, int x, int y, int w, int h) {
+        if (w <= 0 || h <= 0) return;
+        g.fill(x, y, x + w, y + h, 0xA81D2534);
+        g.outline(x, y, w, h, 0xFF425472);
+    }
+
+    public static ItemStack itemStack(String itemId) {
+        if (itemId == null || itemId.isBlank()) return ItemStack.EMPTY;
+        Identifier id = Identifier.tryParse(itemId.trim());
+        if (id == null) return ItemStack.EMPTY;
+        return BuiltInRegistries.ITEM.getOptional(id)
+            .filter(item -> item != Items.AIR)
+            .map(Item::getDefaultInstance)
+            .orElse(ItemStack.EMPTY);
+    }
+
+    public static String itemDisplayName(String itemId) {
+        ItemStack stack = itemStack(itemId);
+        if (!stack.isEmpty()) return stack.getHoverName().getString();
+        if (itemId == null || itemId.isBlank()) return "";
+        return itemId;
+    }
+
+    public static String enchantmentDisplayName(String enchantmentId) {
+        if (enchantmentId == null || enchantmentId.isBlank()) return "";
+        String normalized = enchantmentId.trim();
+        var mc = Minecraft.getInstance();
+        Identifier id = Identifier.tryParse(normalized);
+        if (mc.level != null && id != null) {
+            var value = mc.level.registryAccess()
+                .lookupOrThrow(Registries.ENCHANTMENT)
+                .getValue(id);
+            if (value != null) return value.description().getString();
+        }
+        return Component.translatable("enchantment." + normalized.replace(':', '.')).getString();
+    }
+
+    public static int enchantmentMaxLevel(String enchantmentId) {
+        if (enchantmentId == null || enchantmentId.isBlank()) return 5;
+        var mc = Minecraft.getInstance();
+        Identifier id = Identifier.tryParse(enchantmentId.trim());
+        if (mc.level != null && id != null) {
+            var value = mc.level.registryAccess()
+                .lookupOrThrow(Registries.ENCHANTMENT)
+                .getValue(id);
+            if (value != null) return Math.max(1, value.getMaxLevel());
+        }
+        return 5;
+    }
+
+    public static String dimensionDisplayName(String dimensionId) {
+        if (dimensionId == null || dimensionId.isBlank()) return "";
+        return switch (dimensionId) {
+            case "minecraft:overworld" -> Component.translatable("vv.dim.overworld").getString();
+            case "minecraft:the_nether" -> Component.translatable("vv.dim.nether").getString();
+            case "minecraft:the_end" -> Component.translatable("vv.dim.end").getString();
+            default -> dimensionId;
+        };
+    }
+
+    public static String relativeTimeText(long epochMillis) {
+        var rel = UiFormatting.relativeTime(epochMillis, System.currentTimeMillis());
+        return switch (rel.unit()) {
+            case JUST_NOW -> Component.translatable("vv.time.justNow").getString();
+            case MINUTES -> Component.translatable("vv.time.minutes", rel.value()).getString();
+            case HOURS -> Component.translatable("vv.time.hours", rel.value()).getString();
+            case DAYS -> Component.translatable("vv.time.days", rel.value()).getString();
+        };
+    }
+
+    public static String exactLocalTimeText(long epochMillis) {
+        return LOCAL_TIME.format(Instant.ofEpochMilli(epochMillis));
+    }
+
+    public static String uiStatusKey(DisplayStatus status) {
+        return "vv.ui.status." + status.name().toLowerCase(Locale.ROOT);
+    }
+
+    public static String targetSummary(TargetTrade t) {
+        String itemName = itemDisplayName(t.item());
+        String priceText = t.maxUnitPrice() == 0
+            ? Component.translatable("vv.target.anyPrice").getString()
+            : Component.translatable("vv.target.maxPriceShort", UiFormatting.formatDecimal(t.maxUnitPrice())).getString();
+        String keepText = Component.translatable("vv.target.keepShort", t.backups()).getString();
+        if (t.enchantment() == null || t.enchantment().isBlank()) {
+            return Component.translatable("vv.target.rowPlain", itemName, priceText, keepText).getString();
+        }
+        String enchName = enchantmentDisplayName(t.enchantment());
+        return Component.translatable("vv.target.rowEnchanted",
+            itemName, enchName, t.minLevel(), priceText, keepText).getString();
+    }
+
+    public static String formatGap(String rawGap) {
+        var parsed = UiFormatting.parseGap(rawGap);
+        if (parsed == null) return rawGap;
+        String item = itemDisplayName(parsed.itemId());
+        String subject = parsed.enchantmentId().isBlank()
+            ? item
+            : Component.translatable("vv.gap.subjectEnchanted",
+                item, enchantmentDisplayName(parsed.enchantmentId())).getString();
+        if (parsed.priceUnmet()) {
+            return Component.translatable("vv.gap.priceUnmet", subject).getString();
+        }
+        return Component.translatable("vv.gap.count", subject, parsed.countPart()).getString();
+    }
+}
