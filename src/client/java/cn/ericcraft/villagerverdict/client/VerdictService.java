@@ -72,6 +72,8 @@ public final class VerdictService {
   public Map<UUID, Marker> markers = Map.of();
   public Set<UUID> nearby = Set.of();
   public UUID selected;
+  /** The villager currently shown by the single-target navigation mode, if any. */
+  public UUID navigationTarget;
   public long scanNanos, analysisNanos, markerNanos;
 
   public long writeNanos() {
@@ -181,6 +183,7 @@ public final class VerdictService {
     // ImmutableCollections.Set12 rejects null in contains(); selection is optional during
     // entity unloads and level teardown.
     if (selected != null && removed.contains(selected)) selected = null;
+    if (navigationTarget != null && removed.contains(navigationTarget)) navigationTarget = null;
     nearby = Set.copyOf(records.keySet());
     var remainingMarkers = new HashMap<>(markers);
     removed.forEach(remainingMarkers::remove);
@@ -314,6 +317,7 @@ public final class VerdictService {
     nearby = Set.of();
     notifications.clear();
     selected = null;
+    navigationTarget = null;
     ready = false;
     level = mc.level;
     if (level == null) {
@@ -439,6 +443,7 @@ public final class VerdictService {
     markers = Map.of();
     nearby = Set.of();
     selected = null;
+    navigationTarget = null;
     ticks = 0;
     dirty = false;
     // Configuration may have been edited after the clear began, while disk work was queued.
@@ -612,11 +617,12 @@ public final class VerdictService {
       cancel(State.CONFLICT);
       return;
     }
-    if (ready && !clearingCurrentWorld() && entity instanceof Villager v && inRange(v)
-        && probe.begin(generation, identity.dimension(), v.getUUID(), v.getId(), Mode.MANUAL)) {
+    if (ready && !clearingCurrentWorld() && probe.manualReady()
+        && entity instanceof Villager v && inRange(v)) {
       // An interaction can precede the next scan, including when automatic scanning is disabled.
+      // Profession refresh evicts old active state; do it before creating the new request.
       refreshRecord(v, System.currentTimeMillis());
-      save();
+      if (probe.begin(generation, identity.dimension(), v.getUUID(), v.getId(), Mode.MANUAL)) save();
     }
   }
 
@@ -832,6 +838,22 @@ public final class VerdictService {
             .orElse(null);
   }
 
+  public boolean navigationActive() {
+    return navigationTarget != null;
+  }
+
+  public void startNavigation(UUID target) {
+    var record = record(target);
+    if (record == null || !enabled(record)) return;
+    navigationTarget = target;
+    prepareMarkers();
+  }
+
+  public void cancelNavigation() {
+    navigationTarget = null;
+    prepareMarkers();
+  }
+
   public double distanceSquared(VillagerRecord v) {
     return mc.player == null
         ? Double.POSITIVE_INFINITY
@@ -906,6 +928,7 @@ public final class VerdictService {
         loaded.values().stream()
             .filter(this::enabled)
             .filter(v -> nearby.contains(v.getUUID()))
+            .filter(v -> navigationTarget == null || v.getUUID().equals(navigationTarget))
             .filter(v -> records.containsKey(v.getUUID())
                 && records.get(v.getUUID()).profession().equals(v.getVillagerData().profession().getRegisteredName()))
             .sorted(

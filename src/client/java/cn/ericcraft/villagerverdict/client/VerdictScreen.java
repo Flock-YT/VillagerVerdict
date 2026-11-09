@@ -346,9 +346,10 @@ public final class VerdictScreen extends WorldScreen {
     private void initBottomBar() {
         int y = height - 26;
         int doneW = 64;
-        int avail = width - 24 - doneW - 8;
+        int cancelW = s.navigationActive() ? Math.min(100, (width - 24) / 4) : 0;
+        int avail = width - 24 - doneW - 8 - (cancelW > 0 ? cancelW + 4 : 0);
 
-        int scanW = Math.min(92, Math.max(64, avail * 28 / 100));
+        int scanW = Math.min(92, Math.max(40, avail * 28 / 100));
         var scanBtn = button(Component.translatable("vv.scan"), 12, y, scanW, () -> {
             s.scan();
             rebuildWidgets();
@@ -356,7 +357,7 @@ public final class VerdictScreen extends WorldScreen {
         scanBtn.setTooltip(Tooltip.create(Component.translatable("vv.scan.help")));
 
         boolean running = s.probe.running();
-        int probeW = Math.min(156, Math.max(88, avail - scanW - 4));
+        int probeW = Math.min(156, Math.max(40, avail - scanW - 4));
         Component probeLabel = Component.translatable(running ? "vv.probeRunning" : "vv.probeStart")
             .withColor(running ? 0xFF55DD88 : 0xFFFFFFFF);
         var probeBtn = button(probeLabel, 12 + scanW + 4, y, probeW, () -> {
@@ -365,6 +366,14 @@ public final class VerdictScreen extends WorldScreen {
         });
         probeBtn.setTooltip(Tooltip.create(Component.translatable("vv.probe.help")));
 
+        if (s.navigationActive()) {
+            var cancelBtn = button(Component.translatable("vv.cancelNavigate"),
+                width - doneW - 16 - cancelW, y, cancelW, () -> {
+                    s.cancelNavigation();
+                    rebuildWidgets();
+                });
+            cancelBtn.setTooltip(Tooltip.create(Component.translatable("vv.cancelNavigate.help")));
+        }
         button(Component.translatable("gui.done"), width - doneW - 12, y, doneW, this::onClose);
     }
 
@@ -396,13 +405,7 @@ public final class VerdictScreen extends WorldScreen {
     }
 
     private void locateSelected() {
-        var r = s.record(s.selected);
-        if (r != null) {
-            ShortcutActions.show(Component.translatable(
-                "vv.feedback.locatedNav",
-                (int) r.x(), (int) r.y(), (int) r.z(),
-                (int) Math.sqrt(s.distanceSquared(r))));
-        }
+        s.startNavigation(s.selected);
         minecraft.gui.setScreen(null);
     }
 

@@ -26,11 +26,16 @@ final class ShortcutActions {
 
     static void navigateNext() {
         var service = VerdictService.INSTANCE;
+        if (service.navigationActive()) {
+            service.cancelNavigation();
+            return;
+        }
         service.navigateNext();
-        var target = service.record(service.selected);
-        show(target == null ? Component.translatable("vv.feedback.noTarget")
-            : Component.translatable("vv.feedback.located", (int) target.x(), (int) target.y(),
-                (int) target.z(), (int) Math.sqrt(service.distanceSquared(target))));
+        service.startNavigation(service.selected);
+    }
+
+    static void cancelNavigation() {
+        VerdictService.INSTANCE.cancelNavigation();
     }
 
     static void toggleProbe() {

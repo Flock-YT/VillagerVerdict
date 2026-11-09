@@ -5,7 +5,6 @@ import java.util.*;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.*;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.*;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.resources.Identifier;
@@ -39,6 +38,7 @@ public final class VillagerverdictClient implements ClientModInitializer {
     var scan = key("scan", InputConstants.UNKNOWN.getValue(), category);
     var mark = key("mark", InputConstants.UNKNOWN.getValue(), category);
     var next = key("navigate", InputConstants.UNKNOWN.getValue(), category);
+    var cancelNavigate = key("cancelNavigate", InputConstants.UNKNOWN.getValue(), category);
     var probe = key("probe", InputConstants.UNKNOWN.getValue(), category);
     shortcutManager = new ShortcutManager(
         net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir()
@@ -70,33 +70,13 @@ public final class VillagerverdictClient implements ClientModInitializer {
           while (scan.consumeClick()) if (internal) ShortcutActions.scan();
           while (mark.consumeClick()) if (internal) ShortcutActions.toggleMarkers();
           while (next.consumeClick()) if (internal) ShortcutActions.navigateNext();
+          while (cancelNavigate.consumeClick()) if (internal) ShortcutActions.cancelNavigation();
           while (probe.consumeClick()) if (internal) ShortcutActions.toggleProbe();
         });
     ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> {
       shortcutManager.close();
       s.close();
     });
-    HudElementRegistry.attachElementBefore(
-        VanillaHudElements.CHAT,
-        Identifier.fromNamespaceAndPath("villagerverdict", "navigation"),
-        (g, dt) -> {
-          if (net.minecraft.client.Minecraft.getInstance().gui.screen() instanceof WorldScreen) return;
-          var r = s.record(s.selected);
-          if (r != null && s.settings.markers()) {
-            g.text(
-                net.minecraft.client.Minecraft.getInstance().font,
-                net.minecraft.network.chat.Component.translatable(
-                    "vv.navigation",
-                    (int) r.x(),
-                    (int) r.y(),
-                    (int) r.z(),
-                    (int) Math.sqrt(s.distanceSquared(r))),
-                8,
-                8,
-                0xFFFFFFFF);
-
-          }
-        });
   }
 
   private KeyMapping key(String name, int code, KeyMapping.Category c) {

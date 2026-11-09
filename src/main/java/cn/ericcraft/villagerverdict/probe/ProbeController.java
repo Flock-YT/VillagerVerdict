@@ -84,6 +84,10 @@ public final class ProbeController {
         && clock.getAsLong() >= cooldown.getOrDefault(id, 0L);
   }
 
+  public boolean manualReady() {
+    return context == null && clock.getAsLong() >= quarantine;
+  }
+
   public boolean begin(long generation, String dimension, UUID uuid, int entityId, Mode mode) {
     if (context != null) {
       stop(State.CONFLICT);

@@ -26,7 +26,8 @@ class ShortcutBindingsTest {
     @Test
     void restartRestoresInternalKeysIndependentlyOfManagementKey() throws Exception {
         var path = directory.resolve("shortcuts.json");
-        var settings = new ShortcutBindings(1, Map.of("scan", "key.keyboard.f9", "mark", "key.keyboard.f10"));
+        var settings = new ShortcutBindings(1, Map.of("scan", "key.keyboard.f9", "mark", "key.keyboard.f10",
+            "cancelNavigate", "key.keyboard.f5"));
         try (var store = new JsonStore(e -> fail(e))) {
             store.save(path, settings);
             store.flush().get();

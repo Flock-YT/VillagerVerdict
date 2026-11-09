@@ -21,6 +21,10 @@ import net.minecraft.world.phys.EntityHitResult;
  * Real integrated-server packets, native screen creation and rendering; no mocked merchant packets.
  */
 public class ClientIntegrationTest implements FabricClientGameTest {
+  private static VillagerverdictClient.Shortcut shortcut(String id) {
+    return VillagerverdictClient.shortcuts().stream().filter(s -> s.id().equals(id)).findFirst().orElseThrow();
+  }
+
   public void runTest(ClientGameTestContext c) {
     try (var world = c.worldBuilder().create()) {
       var server = world.getServer();
@@ -29,16 +33,17 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       c.runOnClient(
           mc -> {
             var shortcuts = VillagerverdictClient.shortcuts();
-            if (shortcuts.size() != 5) throw new AssertionError("shortcut registry incomplete");
-            if (shortcuts.get(0).mapping().getDefaultKey().getValue() != InputConstants.KEY_F8)
+            if (shortcuts.size() != 6) throw new AssertionError("shortcut registry incomplete");
+            if (shortcut("manage").mapping().getDefaultKey().getValue() != InputConstants.KEY_F8)
               throw new AssertionError("management shortcut is not F8");
-            for (int i = 1; i < shortcuts.size(); i++)
-              if (!shortcuts.get(i).mapping().getDefaultKey().equals(InputConstants.UNKNOWN))
+            for (var shortcut : shortcuts)
+              if (!shortcut.id().equals("manage") && !shortcut.mapping().getDefaultKey().equals(InputConstants.UNKNOWN))
                 throw new AssertionError("non-management shortcut has a default binding");
           });
       server.runCommand("tp @p 0 -60 0");
       testShortcuts(c);
       testShortcutFeedback(c, server);
+      testNavigation(c, server);
       testContinuousThreeStates(c, server, connection);
       UUID id =
           server.computeOnServer(
@@ -498,7 +503,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.clickScreenButton("key.villagerverdict.scan");
     c.getInput().pressKey(InputConstants.KEY_F9);
     c.runOnClient(mc -> {
-      var scan = VillagerverdictClient.shortcuts().get(1).mapping();
+      var scan = shortcut("scan").mapping();
       if (!scan.matches(InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_F9)))
         throw new AssertionError("shortcut capture failed");
       long nativeCount = Arrays.stream(mc.options.keyMappings)
@@ -522,20 +527,20 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     });
     c.waitFor(mc -> restarted.ready());
     c.runOnClient(mc -> {
-      if (!restarted.editable() || !VillagerverdictClient.shortcuts().get(1).mapping()
+      if (!restarted.editable() || !shortcut("scan").mapping()
           .matches(InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_F9)))
         throw new AssertionError("new shortcut controller did not restore saved binding");
       restarted.close();
       mc.options.save();
       mc.options.load();
-      if (!VillagerverdictClient.shortcuts().get(1).mapping()
+      if (!shortcut("scan").mapping()
           .matches(InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_F9)))
         throw new AssertionError("vanilla options interfered with internal shortcut");
     });
     c.clickScreenButton("key.villagerverdict.mark");
     c.getInput().pressKey(InputConstants.KEY_F9);
     c.runOnClient(mc -> {
-      if (!VillagerverdictClient.shortcuts().get(1).mapping().isUnbound())
+      if (!shortcut("scan").mapping().isUnbound())
         throw new AssertionError("duplicate shortcut was not released");
     });
     c.clickScreenButton("gui.done");
@@ -554,14 +559,14 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.getInput().pressKey(InputConstants.KEY_F8);
     c.waitForScreen(ShortcutScreen.class);
     c.runOnClient(mc -> {
-      if (!VillagerverdictClient.shortcuts().getFirst().mapping().isUnbound())
+      if (!shortcut("manage").mapping().isUnbound())
         throw new AssertionError("duplicate management key was not released");
     });
     c.clickScreenButton("key.villagerverdict.scan");
     c.getInput().pressKey(InputConstants.KEY_ESCAPE);
     c.waitForScreen(ShortcutScreen.class);
     c.runOnClient(mc -> {
-      if (!VillagerverdictClient.shortcuts().get(1).mapping().isUnbound())
+      if (!shortcut("scan").mapping().isUnbound())
         throw new AssertionError("Escape did not clear shortcut");
     });
     c.clickScreenButton("vv.restoreDefaults");
@@ -575,14 +580,14 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.runOnClient(mc -> {
       var nativeScreen = new net.minecraft.client.gui.screens.options.controls.KeyBindsScreen(null, mc.options);
       mc.gui.setScreen(nativeScreen);
-      nativeScreen.selectedKey = VillagerverdictClient.shortcuts().getFirst().mapping();
+      nativeScreen.selectedKey = shortcut("manage").mapping();
     });
     c.getInput().pressKey(InputConstants.KEY_F7);
     c.clickScreenButton("gui.done");
     c.runOnClient(mc -> {
       mc.options.save();
       mc.options.load();
-      if (!VillagerverdictClient.shortcuts().getFirst().mapping()
+      if (!shortcut("manage").mapping()
           .matches(InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_F7)))
         throw new AssertionError("management key not synchronized with native options");
     });
@@ -603,8 +608,8 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.getInput().pressMouse(5);
     c.runOnClient(mc -> {
       var shortcuts = VillagerverdictClient.shortcuts();
-      if (!shortcuts.get(1).mapping().matches(InputConstants.Type.MOUSE.getOrCreate(4))
-          || !shortcuts.get(2).mapping().matches(InputConstants.Type.MOUSE.getOrCreate(5)))
+      if (!shortcut("scan").mapping().matches(InputConstants.Type.MOUSE.getOrCreate(4))
+          || !shortcut("mark").mapping().matches(InputConstants.Type.MOUSE.getOrCreate(5)))
         throw new AssertionError("side mouse buttons were not captured");
     });
     c.takeScreenshot("shortcuts-mouse");
@@ -620,15 +625,15 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.runOnClient(mc -> VillagerverdictClient.shortcutManager().load());
     c.waitFor(mc -> VillagerverdictClient.shortcutManager().editable());
     c.runOnClient(mc -> {
-      if (!VillagerverdictClient.shortcuts().get(1).mapping().matches(InputConstants.Type.MOUSE.getOrCreate(4))
-          || !VillagerverdictClient.shortcuts().get(2).mapping().matches(InputConstants.Type.MOUSE.getOrCreate(5)))
+      if (!shortcut("scan").mapping().matches(InputConstants.Type.MOUSE.getOrCreate(4))
+          || !shortcut("mark").mapping().matches(InputConstants.Type.MOUSE.getOrCreate(5)))
         throw new AssertionError("mouse bindings were not restored");
     });
     c.clickScreenButton("key.villagerverdict.navigate");
     c.getInput().pressMouse(4);
     c.runOnClient(mc -> {
-      if (!VillagerverdictClient.shortcuts().get(1).mapping().isUnbound()
-          || !VillagerverdictClient.shortcuts().get(3).mapping().matches(InputConstants.Type.MOUSE.getOrCreate(4)))
+      if (!shortcut("scan").mapping().isUnbound()
+          || !shortcut("navigate").mapping().matches(InputConstants.Type.MOUSE.getOrCreate(4)))
         throw new AssertionError("duplicate mouse binding was not released");
       mc.gui.setScreen(null);
     });
@@ -663,9 +668,11 @@ public class ClientIntegrationTest implements FabricClientGameTest {
   }
 
   private void testDataClear(ClientGameTestContext c) {
+    int activeCount = c.computeOnClient(mc -> VerdictService.INSTANCE.records().size());
     var original = c.computeOnClient(mc -> {
       var service = VerdictService.INSTANCE;
       service.selected = service.records().iterator().next().uuid();
+      service.startNavigation(service.selected);
       return new WorldData(4, service.identity(), service.records().stream().filter(v -> v.snapshot() != null).map(CachedTrade::from).toList(),
           List.copyOf(service.targets), List.copyOf(service.regions));
     });
@@ -702,7 +709,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var service = VerdictService.INSTANCE;
       if (!service.records().isEmpty() || !service.analysis.verdicts().isEmpty()
           || !service.regional.isEmpty() || !service.markers.isEmpty()
-          || !service.nearby.isEmpty() || service.selected != null || service.probe.running())
+          || !service.nearby.isEmpty() || service.selected != null || service.navigationActive() || service.probe.running())
         throw new AssertionError("clear left stale memory or asynchronous analysis");
       if (!service.targets.equals(original.targets()) || !service.regions.equals(original.regions()))
         throw new AssertionError("clear removed configuration");
@@ -717,7 +724,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.clickScreenButton("gui.done");
     c.clickScreenButton("gui.cancel");
     c.clickScreenButton("vv.scan");
-    c.waitFor(mc -> VerdictService.INSTANCE.records().size() >= 303);
+    c.waitFor(mc -> VerdictService.INSTANCE.records().size() == activeCount);
     c.runOnClient(mc -> {
       if (VerdictService.INSTANCE.records().stream().anyMatch(v -> v.snapshot() != null))
         throw new AssertionError("fresh scan restored old trade snapshots");
@@ -773,7 +780,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var future = service.clearWorldVillagers(service.identity());
       // Queue the bound scan key while the completion callback cannot yet run on this thread.
       var scanKey = InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_F9);
-      VillagerverdictClient.shortcutManager().bind(VillagerverdictClient.shortcuts().get(1), scanKey);
+      VillagerverdictClient.shortcutManager().bind(shortcut("scan"), scanKey);
       net.minecraft.client.KeyMapping.click(scanKey);
       net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.invoker().onEndTick(mc);
       var overlay = (net.minecraft.network.chat.Component) privateField(mc.gui.hud, "overlayMessageString");
@@ -895,14 +902,135 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     });
   }
 
+  private void assertNavigation(ClientGameTestContext c, UUID target, List<UUID> villagers) {
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.tick();
+      if (!Objects.equals(target, service.navigationTarget)) throw new AssertionError("wrong find target");
+      for (UUID id : villagers) {
+        var v = (Villager) mc.level.getEntity(id);
+        var state = mc.getEntityRenderDispatcher().getRenderer(v).createRenderState(v, 0);
+        boolean visible = service.settings.markers() && (target == null || target.equals(id));
+        if (service.markers.containsKey(id) != visible || state.appearsGlowing() != visible
+            || !labelText(state).isEmpty() != visible)
+          throw new AssertionError("incorrect find rendering for " + id);
+        if (visible && state.outlineColor != service.markers.get(id).color())
+          throw new AssertionError("find changed verdict color");
+      }
+    });
+  }
+
+  private void testNavigation(ClientGameTestContext c, TestServerContext server) {
+    var rotation = c.computeOnClient(mc -> new float[] {mc.player.getYRot(), mc.player.getXRot()});
+    var ids = server.computeOnServer(s -> {
+      var result = new ArrayList<UUID>();
+      for (int x : new int[] {2, 5}) {
+        var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+        v.setNoAi(true);
+        setProfession(v, VillagerProfession.LIBRARIAN);
+        v.setPos(x, -60, 0);
+        s.overworld().addFreshEntity(v);
+        result.add(v.getUUID());
+      }
+      return result;
+    });
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) != null));
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.scan();
+      service.navigateNext();
+      if (service.navigationActive()) throw new AssertionError("background selection started find");
+      VillagerverdictClient.shortcutManager().bind(shortcut("navigate"),
+          InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_F6));
+      VillagerverdictClient.shortcutManager().bind(shortcut("cancelNavigate"),
+          InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_F5));
+      mc.gui.hud.setOverlayMessage(net.minecraft.network.chat.Component.literal("find sentinel"), false);
+    });
+    assertNavigation(c, null, ids);
+    c.getInput().pressKey(InputConstants.KEY_F6);
+    assertNavigation(c, ids.getFirst(), ids);
+    c.runOnClient(mc -> {
+      var text = (net.minecraft.network.chat.Component) privateField(mc.gui.hud, "overlayMessageString");
+      if (!text.getString().equals("find sentinel")) throw new AssertionError("find emitted overlay text");
+      // Merely selecting a list row must not switch the find target.
+      VerdictService.INSTANCE.selected = ids.getLast();
+      mc.gui.hud.setOverlayMessage(net.minecraft.network.chat.Component.empty(), false);
+    });
+    assertNavigation(c, ids.getFirst(), ids);
+    c.getInput().lookAt(new net.minecraft.core.BlockPos(3, -59, 0));
+    c.takeScreenshot("find-only-one-of-two");
+    c.getInput().pressKey(InputConstants.KEY_F6);
+    assertNavigation(c, null, ids);
+    c.setScreen(VerdictScreen::new);
+    clickButtonContaining(c, "Lv.");
+    c.runOnClient(mc -> VerdictService.INSTANCE.selected = ids.getLast());
+    c.clickScreenButton("vv.navigate");
+    assertNavigation(c, ids.getLast(), ids);
+    c.runOnClient(mc -> VerdictService.INSTANCE.navigateNext());
+    assertNavigation(c, ids.getLast(), ids);
+    c.runOnClient(mc -> SettingsScreen.toggleMarkers());
+    assertNavigation(c, ids.getLast(), ids);
+    c.runOnClient(mc -> SettingsScreen.toggleMarkers());
+    assertNavigation(c, ids.getLast(), ids);
+    c.setScreen(VerdictScreen::new);
+    c.takeScreenshot("find-cancel-button");
+    c.clickScreenButton("vv.cancelNavigate");
+    assertNavigation(c, null, ids);
+    c.runOnClient(mc -> {
+      mc.gui.setScreen(null);
+      VerdictService.INSTANCE.startNavigation(ids.getLast());
+    });
+    c.getInput().pressKey(InputConstants.KEY_F5);
+    assertNavigation(c, null, ids);
+    // Explicitly change the target while finding.
+    c.runOnClient(mc -> {
+      VerdictService.INSTANCE.startNavigation(ids.getFirst());
+      VerdictService.INSTANCE.selected = ids.getLast();
+      mc.gui.setScreen(new VerdictScreen());
+    });
+    clickButtonContaining(c, "Lv.");
+    c.runOnClient(mc -> VerdictService.INSTANCE.selected = ids.getLast());
+    c.clickScreenButton("vv.navigate");
+    assertNavigation(c, ids.getLast(), ids);
+    server.runOnServer(s -> setProfession((Villager) s.overworld().getEntity(ids.getLast()), VillagerProfession.NONE));
+    c.waitFor(mc -> !VerdictService.INSTANCE.navigationActive());
+    assertNavigation(c, null, List.of(ids.getFirst()));
+    var settings = c.computeOnClient(mc -> VerdictService.INSTANCE.settings);
+    c.runOnClient(mc -> {
+      var service = VerdictService.INSTANCE;
+      service.startNavigation(ids.getFirst());
+      service.settings(withDataset(settings, "navigation-transition"));
+      service.tick();
+      if (service.navigationActive()) throw new AssertionError("world transition retained find");
+    });
+    c.waitFor(mc -> VerdictService.INSTANCE.ready());
+    c.runOnClient(mc -> VerdictService.INSTANCE.settings(settings));
+    c.waitFor(mc -> VerdictService.INSTANCE.ready()
+        && VerdictService.INSTANCE.identity().dataset().equals(settings.dataset()));
+    c.runOnClient(mc -> {
+      VerdictService.INSTANCE.scan();
+      VerdictService.INSTANCE.startNavigation(ids.getFirst());
+    });
+    assertNavigation(c, ids.getFirst(), List.of(ids.getFirst()));
+    server.runOnServer(s -> ids.forEach(id -> s.overworld().getEntity(id).discard()));
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) == null));
+    c.runOnClient(mc -> {
+      if (VerdictService.INSTANCE.navigationActive()) throw new AssertionError("unload retained find");
+      mc.player.setYRot(rotation[0]);
+      mc.player.setXRot(rotation[1]);
+      VillagerverdictClient.resetShortcuts();
+    });
+    System.out.println("VV_NAVIGATION_PASS single target, selection isolation, silent HUD, toggle, button, cancel key, master switch, invalidation");
+  }
+
   private void testShortcutFeedback(ClientGameTestContext c, TestServerContext server) {
     var original = c.computeOnClient(mc -> VerdictService.INSTANCE.settings);
     c.runOnClient(mc -> {
-      int[] keys = {InputConstants.KEY_F8, InputConstants.KEY_F9, InputConstants.KEY_F10,
-          InputConstants.KEY_F6, InputConstants.KEY_F7};
-      for (int i = 0; i < keys.length; i++)
-        VillagerverdictClient.shortcutManager().bind(VillagerverdictClient.shortcuts().get(i),
-            InputConstants.Type.KEYBOARD.getOrCreate(keys[i]));
+      var keys = Map.of("manage", InputConstants.KEY_F8, "scan", InputConstants.KEY_F9,
+          "mark", InputConstants.KEY_F10, "navigate", InputConstants.KEY_F6,
+          "cancelNavigate", InputConstants.KEY_F5, "probe", InputConstants.KEY_F7);
+      keys.forEach((id, key) -> VillagerverdictClient.shortcutManager().bind(shortcut(id),
+          InputConstants.Type.KEYBOARD.getOrCreate(key)));
     });
     c.getInput().pressKey(InputConstants.KEY_F10);
     assertOverlay(c, "vv.feedback.markersOff");
@@ -912,7 +1040,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.getInput().pressKey(InputConstants.KEY_F9);
     assertOverlay(c, "vv.feedback.scan", 0);
     c.getInput().pressKey(InputConstants.KEY_F6);
-    assertOverlay(c, "vv.feedback.noTarget");
+    assertOverlay(c, "vv.feedback.scan", 0);
     c.getInput().pressKey(InputConstants.KEY_F7);
     c.waitForScreen(WorldConfirmScreen.class);
     c.runOnClient(mc -> {
@@ -953,13 +1081,13 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.getInput().pressKey(InputConstants.KEY_F9);
     assertOverlay(c, "vv.feedback.scan", 1);
     c.getInput().pressKey(InputConstants.KEY_F6);
-    int distance = c.computeOnClient(mc -> {
+    c.runOnClient(mc -> {
       var service = VerdictService.INSTANCE;
-      if (!worker.equals(service.selected)) throw new AssertionError("shortcut selected wrong villager");
-      return (int) Math.sqrt(service.distanceSquared(service.record(worker)));
+      if (!worker.equals(service.selected) || !worker.equals(service.navigationTarget))
+        throw new AssertionError("shortcut selected wrong villager");
     });
-    assertOverlay(c, "vv.feedback.located", 2, -60, 0, distance);
-    c.takeScreenshot("feedback-located-en");
+    assertOverlay(c, "vv.feedback.scan", 1);
+    c.takeScreenshot("find-single-target-en");
     c.setScreen(() -> new ShortcutScreen(new VerdictScreen()));
     c.clickScreenButton("key.villagerverdict.mark");
     c.getInput().pressKey(InputConstants.KEY_F10);
@@ -967,7 +1095,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       if (!VerdictService.INSTANCE.settings.markers()) throw new AssertionError("capture triggered gameplay action");
       var message = (net.minecraft.network.chat.Component) privateField(mc.gui.hud, "overlayMessageString");
       if (!message.getString().equals(net.minecraft.network.chat.Component.translatable(
-          "vv.feedback.located", 2, -60, 0, distance).getString()))
+          "vv.feedback.scan", 1).getString()))
         throw new AssertionError("capture emitted gameplay feedback");
     });
     c.clickScreenButton("gui.done");
@@ -1225,7 +1353,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     if (locale.equals("zh")) {
       c.runOnClient(mc -> {
         mc.gui.setScreen(null);
-        VillagerverdictClient.shortcutManager().bind(VillagerverdictClient.shortcuts().get(2),
+        VillagerverdictClient.shortcutManager().bind(shortcut("mark"),
             InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_F10));
       });
       c.getInput().pressKey(InputConstants.KEY_F10);
