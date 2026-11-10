@@ -219,6 +219,7 @@ public final class TargetEditorScreen extends WorldScreen {
         priceBox.setMaxLength(12);
         priceBox.setValue(maxPriceText);
         priceBox.setHint(Component.translatable("vv.targetEditor.priceHint"));
+        priceBox.setTooltip(Tooltip.create(Component.translatable("vv.targetEditor.priceHint")));
         priceBox.setResponder(v -> {
             maxPriceText = v;
             error = "";
@@ -522,10 +523,11 @@ public final class TargetEditorScreen extends WorldScreen {
                     py += 10;
                 }
             }
-            if (py + 10 < 24 + panelH) {
-                g.text(font, font.plainSubstrByWidth(
-                    Component.translatable("vv.targetEditor.queryHelp").getString(), innerW),
-                    innerX, py, 0xFF8CA4C4);
+            for (var line : font.split(Component.translatable("vv.targetEditor.queryHelp"), innerW)) {
+                if (py + 9 < 24 + panelH) {
+                    g.text(font, line, innerX, py, 0xFF8CA4C4);
+                    py += 10;
+                }
             }
         } else if (mode == Mode.PICK_ITEM) {
             int innerX = px + 8;

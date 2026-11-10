@@ -147,10 +147,18 @@ public final class VillagerEditScreen extends WorldScreen {
 
         g.text(font, Component.translatable("vv.note"), x, 106, 0xFF9FB8D8);
         g.text(font, Component.translatable("vv.tags"), x, 146, 0xFF9FB8D8);
-        if (panelH >= 166) {
-            g.text(font, font.plainSubstrByWidth(
-                Component.translatable("vv.editVillager.tagsTip").getString(), innerW),
-                x, 180, 0xFF8CA4C4);
+        int tipY = 180;
+        for (var line : font.split(Component.translatable("vv.editVillager.tagsTip"), innerW)) {
+            if (tipY + 9 < 26 + panelH) {
+                g.text(font, line, x, tipY, 0xFF8CA4C4);
+                tipY += 10;
+            }
+        }
+        for (var line : font.split(Component.translatable("vv.editVillager.scopeNote"), innerW)) {
+            if (tipY + 9 < 26 + panelH) {
+                g.text(font, line, x, tipY, 0xFF8CA4C4);
+                tipY += 10;
+            }
         }
 
         super.extractRenderState(g, mx, my, delta);

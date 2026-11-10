@@ -49,6 +49,9 @@ public final class DataScreen extends WorldScreen {
         var world = button("vv.clearWorld", innerX + buttonWidth + 4, 30, buttonWidth, () -> confirm(false));
         var server = button("vv.clearServer", innerX + 2 * (buttonWidth + 4), 30,
             innerW - 2 * (buttonWidth + 4), () -> confirm(true));
+        refresh.setTooltip(Tooltip.create(Component.translatable("vv.refresh.help")));
+        world.setTooltip(Tooltip.create(Component.translatable("vv.clearWorld.help")));
+        server.setTooltip(Tooltip.create(Component.translatable("vv.clearServer.help")));
         refresh.active = !busy;
         world.active = server.active = !busy && selected != null;
 

@@ -175,7 +175,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
             mc.resizeGui();
           });
       c.clickScreenButton("vv.targets");
-      c.clickScreenButton("vv.add");
+      c.clickScreenButton("vv.target.add");
       c.waitForScreen(TargetEditorScreen.class);
       c.runOnClient(this::assertTransparent);
       c.takeScreenshot("target-editor");
@@ -190,7 +190,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       c.clickScreenButton("vv.save");
       c.takeScreenshot("targets-populated-zh");
       c.clickScreenButton("vv.regions");
-      c.clickScreenButton("vv.add");
+      c.clickScreenButton("vv.region.add");
       c.waitForScreen(RegionEditorScreen.class);
       c.runOnClient(this::assertTransparent);
       c.takeScreenshot("region-editor");
@@ -1165,7 +1165,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     });
     c.setScreen(VerdictScreen::new);
     c.clickScreenButton("vv.targets");
-    c.clickScreenButton("vv.add");
+    c.clickScreenButton("vv.target.add");
     c.runOnClient(mc -> mc.gui.hud.setOverlayMessage(net.minecraft.network.chat.Component.empty(), false));
     c.takeScreenshot("signature-product-query-editor");
     c.clickScreenButton("vv.save");
@@ -1535,8 +1535,8 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       return service.record(ids.get(0)).snapshot().checkedAt();
     });
     c.setScreen(VerdictScreen::new);
-    for (String filter : List.of("vv.filter.all", "vv.filter.keep", "vv.filter.discard")) {
-      c.clickScreenButton(filter);
+    for (String filter : List.of("vv.filter.keep", "vv.filter.discard", "vv.filter.unscanned")) {
+      clickButtonContaining(c, net.minecraft.network.chat.Component.translatable(filter).getString());
       c.runOnClient(mc -> {
         long rows = mc.gui.screen().children().stream()
             .filter(child -> child instanceof net.minecraft.client.gui.components.Button button
@@ -1619,6 +1619,9 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         throw new AssertionError("saving unrelated settings stopped manual probe or enabled auto-start");
       SettingsScreen.open(null);
       mc.gui.screen().resize(320, 240);
+    });
+    c.clickScreenButton("vv.settings.tab.colors");
+    c.runOnClient(mc -> {
       var screen = mc.gui.screen();
       for (var child : screen.children()) {
         if (child instanceof net.minecraft.client.gui.components.AbstractWidget widget

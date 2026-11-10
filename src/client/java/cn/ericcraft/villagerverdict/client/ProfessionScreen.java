@@ -135,9 +135,9 @@ public final class ProfessionScreen extends WorldScreen {
         int pw = panelWidth();
         ClientDisplayText.drawPanel(graphics, px, 22, pw, Math.max(150, height - 54));
 
-        int helpY = 27;
+        int helpY = 26;
         for (var line : font.split(Component.translatable("vv.professionsHelp"), pw - 16)) {
-            if (helpY <= 38) {
+            if (helpY <= 40) {
                 graphics.text(font, line, px + 8, helpY, 0xFF9FB8D8);
                 helpY += 10;
             }

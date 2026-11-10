@@ -103,6 +103,11 @@ public final class ClientDisplayText {
         return "vv.ui.status." + status.name().toLowerCase(Locale.ROOT);
     }
 
+    /** Localized, player-facing name of a villager status (Keep / Discard / Unscanned). */
+    public static String statusLabel(DisplayStatus status) {
+        return Component.translatable(uiStatusKey(status)).getString();
+    }
+
     public static String productSummary(ItemData item) {
         if (item.enchantments().isEmpty()) return ItemCodecAdapter.displayName(item);
         String enchantments = ItemCodecAdapter.enchantmentText(item);
