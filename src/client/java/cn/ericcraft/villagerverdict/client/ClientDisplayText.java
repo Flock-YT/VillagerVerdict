@@ -1,5 +1,6 @@
 package cn.ericcraft.villagerverdict.client;
 
+import cn.ericcraft.villagerverdict.analysis.LibrarianEnchantments;
 import cn.ericcraft.villagerverdict.model.DisplayStatus;
 import cn.ericcraft.villagerverdict.model.ItemData;
 import cn.ericcraft.villagerverdict.model.TargetTrade;
@@ -8,6 +9,8 @@ import cn.ericcraft.villagerverdict.model.UiFormatting;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -15,9 +18,12 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.tags.EnchantmentTags;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantment;
 
 /** Localized human-friendly presentation helpers for management screens. */
 public final class ClientDisplayText {
@@ -74,6 +80,41 @@ public final class ClientDisplayText {
             if (value != null) return Math.max(1, value.getMaxLevel());
         }
         return 5;
+    }
+
+    public static String enchantmentFullName(String enchantmentId, int level) {
+        if (enchantmentId == null || enchantmentId.isBlank()) return "";
+        String normalized = enchantmentId.trim();
+        var mc = Minecraft.getInstance();
+        Identifier id = Identifier.tryParse(normalized);
+        if (mc.level != null && id != null) {
+            var holder = mc.level.registryAccess()
+                .lookupOrThrow(Registries.ENCHANTMENT)
+                .get(ResourceKey.create(Registries.ENCHANTMENT, id));
+            if (holder.isPresent()) {
+                return Enchantment.getFullname(holder.get(), level).getString();
+            }
+        }
+        String base = enchantmentDisplayName(normalized);
+        int max = enchantmentMaxLevel(normalized);
+        if (level == 1 && max == 1) return base;
+        return base + " " + Component.translatable("enchantment.level." + level).getString();
+    }
+
+    public static List<LibrarianEnchantments.CatalogEntry> tradeableEnchantments() {
+        var mc = Minecraft.getInstance();
+        if (mc.level == null) return List.of();
+        return mc.level.registryAccess()
+            .lookupOrThrow(Registries.ENCHANTMENT)
+            .listElements()
+            .filter(holder -> holder.is(EnchantmentTags.TRADEABLE))
+            .map(holder -> new LibrarianEnchantments.CatalogEntry(
+                holder.getRegisteredName(),
+                Math.max(1, holder.value().getMaxLevel())))
+            .sorted(Comparator
+                .comparing((LibrarianEnchantments.CatalogEntry e) -> enchantmentDisplayName(e.id()))
+                .thenComparing(LibrarianEnchantments.CatalogEntry::id))
+            .toList();
     }
 
     public static String dimensionDisplayName(String dimensionId) {

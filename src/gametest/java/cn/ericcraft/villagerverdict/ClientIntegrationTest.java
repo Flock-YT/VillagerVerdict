@@ -190,6 +190,9 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       c.clickScreenButton("vv.targetEditor.backToForm");
       c.clickScreenButton("vv.save");
       c.takeScreenshot("targets-populated-zh");
+      c.clickScreenButton("vv.books");
+      c.runOnClient(this::assertTransparent);
+      c.takeScreenshot("books-missing-zh");
       c.clickScreenButton("vv.villagers");
       c.runOnClient(mc -> VerdictService.INSTANCE.selected = id);
       clickButtonContaining(c, "Lv.");
@@ -1357,7 +1360,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
                 screen.resize(screen.width, screen.height);
               } catch (ReflectiveOperationException e) { throw new AssertionError(e); }
             }
-            if (((String[]) privateField(screen, "TABS")).length != 2)
+            if (((String[]) privateField(screen, "TABS")).length != 3)
               throw new AssertionError("unexpected management tab");
             var state = new net.minecraft.client.renderer.state.gui.GuiRenderState();
             screen.extractRenderState(new net.minecraft.client.gui.GuiGraphicsExtractor(mc, state, -1, -1), -1, -1, 0);
@@ -1398,7 +1401,53 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       return mc.reloadResourcePacks();
     });
     c.waitFor(mc -> reload.isDone() && mc.gui.overlay() == null, 600);
+    testLibrarianBooksTab(c, server);
     System.out.println("VV_SIGNATURE_DETAILS_PASS base prices, distinct levels and prices, diamond gear, full snapshots, empty/unscanned hints, English/Chinese wide/narrow rendering");
+  }
+
+  private void testLibrarianBooksTab(ClientGameTestContext c, TestServerContext server) {
+    UUID libId = server.computeOnServer(s -> {
+      var registry = s.overworld().registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+      var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+      v.setNoAi(true);
+      v.setPos(2, -60, 2);
+      setProfession(v, VillagerProfession.LIBRARIAN);
+      var offers = new MerchantOffers();
+      var mendingBook = new ItemStack(Items.ENCHANTED_BOOK);
+      net.minecraft.world.item.enchantment.EnchantmentHelper.updateEnchantments(
+          mendingBook, ench -> ench.set(registry.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.MENDING), 1));
+      var unbreakingBook = new ItemStack(Items.ENCHANTED_BOOK);
+      net.minecraft.world.item.enchantment.EnchantmentHelper.updateEnchantments(
+          unbreakingBook, ench -> ench.set(registry.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.UNBREAKING), 3));
+      var prot3Book = new ItemStack(Items.ENCHANTED_BOOK);
+      net.minecraft.world.item.enchantment.EnchantmentHelper.updateEnchantments(
+          prot3Book, ench -> ench.set(registry.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.PROTECTION), 3));
+      offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 12), mendingBook, 12, 1, 0));
+      offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 15), unbreakingBook, 12, 1, 0));
+      offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 18), prot3Book, 12, 1, 0));
+      v.setOffers(offers);
+      s.overworld().addFreshEntity(v);
+      return v.getUUID();
+    });
+    c.waitFor(mc -> mc.level.getEntity(libId) != null);
+    c.runOnClient(mc -> VerdictService.INSTANCE.scan());
+    captureTrades(c, libId);
+    c.runOnClient(mc -> {
+      var catalog = ClientDisplayText.tradeableEnchantments();
+      if (catalog.isEmpty()) throw new AssertionError("tradeable enchantments catalog is empty");
+      if (catalog.stream().noneMatch(e -> e.id().equals("minecraft:binding_curse")))
+        throw new AssertionError("tradeable enchantments missing binding_curse");
+      var records = VerdictService.INSTANCE.records().stream().filter(VerdictService.INSTANCE::enabled).toList();
+      var summary = cn.ericcraft.villagerverdict.analysis.LibrarianEnchantments.analyze(catalog, records);
+      if (summary.owned().stream().noneMatch(e -> e.id().equals("minecraft:mending"))
+          || summary.owned().stream().noneMatch(e -> e.id().equals("minecraft:unbreaking")))
+        throw new AssertionError("mending I and unbreaking III should count as owned");
+      var prot = summary.missing().stream().filter(e -> e.id().equals("minecraft:protection")).findFirst().orElse(null);
+      if (prot == null || prot.highestObservedLevel() != 3 || prot.maxLevel() != 4)
+        throw new AssertionError("protection III must still be reported as missing protection IV");
+    });
+    server.runOnServer(s -> s.overworld().getEntity(libId).discard());
+    c.waitFor(mc -> mc.level.getEntity(libId) == null);
   }
 
   private void testNavigation(ClientGameTestContext c, TestServerContext server) {

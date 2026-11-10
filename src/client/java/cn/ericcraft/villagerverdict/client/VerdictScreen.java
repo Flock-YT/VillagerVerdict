@@ -1,5 +1,7 @@
 package cn.ericcraft.villagerverdict.client;
 
+import cn.ericcraft.villagerverdict.analysis.LibrarianEnchantments;
+import cn.ericcraft.villagerverdict.analysis.LibrarianEnchantments.EnchantmentStatus;
 import cn.ericcraft.villagerverdict.analysis.ProfessionHighlights;
 import cn.ericcraft.villagerverdict.analysis.TradeComparison;
 import cn.ericcraft.villagerverdict.model.AnalysisResult;
@@ -16,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.UUID;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -24,6 +27,7 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 /**
  * Main management workspace: three real tabs plus a separate settings button, a context-aware
@@ -39,7 +43,13 @@ public final class VerdictScreen extends WorldScreen {
     private static final String[] FILTER_HELP = {
         "vv.filter.all.help", "vv.start.keep", "vv.start.discard", "vv.start.unscanned"
     };
-    private static final String[] TABS = {"vv.villagers", "vv.targets"};
+    private static final String[] BOOK_FILTERS = {
+        "vv.books.filter.missing", "vv.books.filter.owned", "vv.books.filter.all"
+    };
+    private static final String[] BOOK_FILTER_HELP = {
+        "vv.books.filter.missing.help", "vv.books.filter.owned.help", "vv.books.filter.all.help"
+    };
+    private static final String[] TABS = {"vv.villagers", "vv.targets", "vv.books"};
 
     /** Top of the navigation row. */
     private static final int NAV_Y = 20;
@@ -59,12 +69,17 @@ public final class VerdictScreen extends WorldScreen {
     private final VerdictService s = VerdictService.INSTANCE;
     private int page;
     private boolean mobileDetailView;
-    private int offset, detailOffset, sort, filter;
+    private int offset, detailOffset, sort, filter, bookFilter;
     private EditBox searchBox;
     private boolean restoreSearch;
     private int searchCursor;
     private String query = "";
+    private EditBox bookSearchBox;
+    private boolean restoreBookSearch;
+    private int bookSearchCursor;
+    private String bookQuery = "";
     private String productQueryId = "";
+    private TargetTrade adHocProductQuery;
     private int refresh;
     private int detailMax, lastClickY = -1, lastClickX;
     private final List<Icon> icons = new ArrayList<>();
@@ -93,7 +108,7 @@ public final class VerdictScreen extends WorldScreen {
     }
 
     private boolean filterActive() {
-        return !productQueryId.isEmpty();
+        return currentProductQuery() != null;
     }
 
     /** Bottom of the villager toolbar: one row on wide screens, two rows on narrow screens. */
@@ -102,7 +117,8 @@ public final class VerdictScreen extends WorldScreen {
     }
 
     private int listTop() {
-        if (page != 0) return CONTENT_Y + 24;
+        if (page == 1) return CONTENT_Y + 24;
+        if (page == 2) return toolbarBottom();
         if (mobileDetail()) return CONTENT_Y + 24;
         return toolbarBottom() + (filterActive() ? 22 : 0);
     }
@@ -131,6 +147,8 @@ public final class VerdictScreen extends WorldScreen {
 
     @Override
     protected void init() {
+        searchBox = null;
+        bookSearchBox = null;
         int tabW = tabWidth();
         for (int i = 0; i < TABS.length; i++) {
             int p = i;
@@ -158,6 +176,8 @@ public final class VerdictScreen extends WorldScreen {
             }
         } else if (page == 1) {
             initTargetsPage();
+        } else if (page == 2) {
+            initBooksPage();
         }
 
         initBottomBar();
@@ -234,6 +254,7 @@ public final class VerdictScreen extends WorldScreen {
                 width - 12 - clearW, toolbarBottom(), clearW,
                 () -> {
                     productQueryId = "";
+                    adHocProductQuery = null;
                     offset = 0;
                     rebuildWidgets();
                 });
@@ -342,6 +363,7 @@ public final class VerdictScreen extends WorldScreen {
             row.setTooltip(Tooltip.create(Component.translatable("vv.target.editHint")));
             var view = button(Component.translatable("vv.target.viewVillagers"), width - 12 - viewW, rowY, viewW, () -> {
                 productQueryId = t.id();
+                adHocProductQuery = null;
                 page = 0;
                 mobileDetailView = false;
                 query = "";
@@ -351,6 +373,100 @@ public final class VerdictScreen extends WorldScreen {
                 rebuildWidgets();
             });
             view.setTooltip(Tooltip.create(Component.translatable("vv.target.viewVillagers.help")));
+        }
+    }
+
+    private void initBooksPage() {
+        int available = width - 24;
+        int searchW, chipsX, chipsY, chipsW;
+        if (isWide()) {
+            searchW = available * 40 / 100;
+            chipsX = 12 + searchW + 6;
+            chipsY = CONTENT_Y;
+            chipsW = available - searchW - 6;
+        } else {
+            searchW = available;
+            chipsX = 12;
+            chipsY = CONTENT_Y + 22;
+            chipsW = available;
+        }
+
+        var search = new EditBox(font, 12, CONTENT_Y, searchW, 20, Component.translatable("vv.books.searchHint"));
+        search.setValue(bookQuery);
+        search.setHint(Component.translatable("vv.books.searchHint"));
+        search.setTooltip(Tooltip.create(Component.translatable("vv.books.search")));
+        search.setResponder(v -> {
+            bookQuery = v;
+            offset = 0;
+            restoreBookSearch = true;
+            bookSearchCursor = search.getCursorPosition();
+            rebuildWidgets();
+        });
+        addRenderableWidget(search);
+        bookSearchBox = search;
+        if (restoreBookSearch) {
+            setFocused(search);
+            search.setCursorPosition(Math.min(bookSearchCursor, bookQuery.length()));
+            restoreBookSearch = false;
+        }
+
+        var summary = bookSummary();
+        int[] counts = {summary.missing().size(), summary.owned().size(), summary.all().size()};
+        int chipW = (chipsW - 2 * 3) / 3;
+        for (int i = 0; i < BOOK_FILTERS.length; i++) {
+            int f = i;
+            boolean selected = bookFilter == i;
+            String text = (selected ? "● " : "")
+                + Component.translatable(BOOK_FILTERS[i]).getString() + " " + counts[i];
+            int w = i == 2 ? chipsW - 2 * (chipW + 3) : chipW;
+            var chip = button(
+                Component.literal(font.plainSubstrByWidth(text, w - 6))
+                    .withColor(selected ? COLOR_ACCENT : COLOR_TEXT),
+                chipsX + i * (chipW + 3), chipsY, w,
+                () -> {
+                    bookFilter = f;
+                    offset = 0;
+                    rebuildWidgets();
+                });
+            chip.setTooltip(Tooltip.create(Component.translatable(BOOK_FILTER_HELP[i])));
+        }
+
+        var list = filteredBooks(summary);
+        int top = listTop();
+        int rows = Math.max(1, (height - top - 32) / 24);
+        offset = Math.clamp(offset, 0, Math.max(0, list.size() - rows));
+        int actionW = Math.min(
+            116,
+            Math.max(
+                font.width(Component.translatable("vv.target.viewVillagers")),
+                font.width(Component.translatable("vv.books.addTarget"))) + 16);
+        int mainW = width - 24 - 22 - actionW - 4;
+        for (int i = offset; i < Math.min(list.size(), offset + rows); i++) {
+            var status = list.get(i);
+            int rowY = top + (i - offset) * 24;
+            String rowText = bookRowLabel(status);
+            int rowColor = bookRowColor(status);
+            var rowBtn = button(
+                Component.literal(font.plainSubstrByWidth(rowText, mainW - 10)).withColor(rowColor),
+                34, rowY, mainW,
+                () -> onBookRowClick(status));
+            rowBtn.setTooltip(Tooltip.create(Component.literal(bookRowTooltip(status))));
+
+            if (status.owned()) {
+                var viewBtn = button(
+                    Component.translatable("vv.target.viewVillagers"),
+                    width - 12 - actionW, rowY, actionW,
+                    () -> viewVillagersForBook(status, status.maxLevel()));
+                viewBtn.setTooltip(Tooltip.create(Component.translatable("vv.target.viewVillagers.help")));
+            } else {
+                boolean tracked = isBookTracked(status);
+                var trackBtn = button(
+                    Component.translatable(tracked ? "vv.books.addedTarget" : "vv.books.addTarget"),
+                    width - 12 - actionW, rowY, actionW,
+                    () -> trackBook(status));
+                trackBtn.active = !tracked;
+                trackBtn.setTooltip(Tooltip.create(Component.translatable("vv.books.addTarget.help")));
+            }
         }
     }
 
@@ -436,7 +552,127 @@ public final class VerdictScreen extends WorldScreen {
     }
 
     private TargetTrade currentProductQuery() {
+        if (adHocProductQuery != null) return adHocProductQuery;
         return s.targets.stream().filter(t -> t.id().equals(productQueryId)).findFirst().orElse(null);
+    }
+
+    private LibrarianEnchantments.Summary bookSummary() {
+        var catalog = ClientDisplayText.tradeableEnchantments();
+        var enabledRecords = s.records().stream().filter(s::enabled).toList();
+        return LibrarianEnchantments.analyze(catalog, enabledRecords);
+    }
+
+    private List<EnchantmentStatus> filteredBooks(LibrarianEnchantments.Summary summary) {
+        List<EnchantmentStatus> source = switch (bookFilter) {
+            case 0 -> summary.missing();
+            case 1 -> summary.owned();
+            default -> {
+                var combined = new ArrayList<EnchantmentStatus>(summary.all().size());
+                combined.addAll(summary.missing());
+                combined.addAll(summary.owned());
+                yield combined;
+            }
+        };
+        String q = bookQuery.trim().toLowerCase(Locale.ROOT);
+        if (q.isEmpty()) return source;
+        return source.stream()
+            .filter(st -> {
+                String name = ClientDisplayText.enchantmentDisplayName(st.id()).toLowerCase(Locale.ROOT);
+                String full = ClientDisplayText.enchantmentFullName(st.id(), st.maxLevel()).toLowerCase(Locale.ROOT);
+                return name.contains(q)
+                    || full.contains(q)
+                    || st.id().toLowerCase(Locale.ROOT).contains(q);
+            })
+            .toList();
+    }
+
+    private String bookRowLabel(EnchantmentStatus status) {
+        String maxName = ClientDisplayText.enchantmentFullName(status.id(), status.maxLevel());
+        if (status.owned()) {
+            return Component.translatable(
+                "vv.books.row.owned",
+                maxName,
+                status.lowestMaxLevelEmeralds(),
+                status.maxLevelSellerCount()).getString();
+        }
+        if (status.highestObservedLevel() > 0) {
+            String currentName = ClientDisplayText.enchantmentFullName(
+                status.id(), status.highestObservedLevel());
+            return Component.translatable(
+                "vv.books.row.missingPartial", maxName, currentName).getString();
+        }
+        return Component.translatable("vv.books.row.missing", maxName).getString();
+    }
+
+    private int bookRowColor(EnchantmentStatus status) {
+        if (status.owned()) return s.settings.green();
+        return status.highestObservedLevel() > 0 ? COLOR_WARN : s.settings.red();
+    }
+
+    private String bookRowTooltip(EnchantmentStatus status) {
+        String base = bookRowLabel(status) + " (" + status.id() + ")";
+        if (status.owned()) {
+            return base + "\n" + Component.translatable("vv.target.viewVillagers.help").getString();
+        }
+        if (status.highestObservedLevel() > 0) {
+            return base + "\n" + Component.translatable("vv.books.partialClickHint").getString();
+        }
+        return base + "\n" + Component.translatable("vv.books.missingClickHint").getString();
+    }
+
+    private void onBookRowClick(EnchantmentStatus status) {
+        if (status.owned()) {
+            viewVillagersForBook(status, status.maxLevel());
+        } else if (status.highestObservedLevel() > 0) {
+            viewVillagersForBook(status, status.highestObservedLevel());
+        } else {
+            openTargetEditor(new TargetTrade(
+                UUID.randomUUID().toString(),
+                "minecraft:enchanted_book",
+                status.id(),
+                status.maxLevel(),
+                0));
+        }
+    }
+
+    private void viewVillagersForBook(EnchantmentStatus status, int minLevel) {
+        adHocProductQuery = new TargetTrade(
+            "__book__",
+            "minecraft:enchanted_book",
+            status.id(),
+            minLevel,
+            0);
+        productQueryId = "";
+        page = 0;
+        mobileDetailView = false;
+        query = "";
+        filter = 0;
+        offset = detailOffset = 0;
+        if (status.bestSellerUuid() != null && s.record(status.bestSellerUuid()) != null) {
+            s.selected = status.bestSellerUuid();
+        } else {
+            s.selected = filtered().stream().map(VillagerRecord::uuid).findFirst().orElse(null);
+        }
+        rebuildWidgets();
+    }
+
+    private boolean isBookTracked(EnchantmentStatus status) {
+        return s.targets.stream().anyMatch(t ->
+            t.item().equals("minecraft:enchanted_book")
+                && t.enchantment().equals(status.id())
+                && t.minLevel() >= status.maxLevel());
+    }
+
+    private void trackBook(EnchantmentStatus status) {
+        if (isBookTracked(status)) return;
+        var target = new TargetTrade(
+            UUID.randomUUID().toString(),
+            "minecraft:enchanted_book",
+            status.id(),
+            status.maxLevel(),
+            0);
+        updateTarget(target.id(), target);
+        rebuildWidgets();
     }
 
     private void updateTarget(String id, TargetTrade t) {
@@ -451,13 +687,15 @@ public final class VerdictScreen extends WorldScreen {
     @Override
     public void tick() {
         if (++refresh % 20 == 0) {
-            if (page == 0 && !productQueryId.isEmpty()) {
+            if (page == 0 && filterActive()) {
                 var matches = filtered();
                 if (matches.stream().noneMatch(v -> v.uuid().equals(s.selected)))
                     s.selected = matches.isEmpty() ? null : matches.getFirst().uuid();
             }
             restoreSearch = searchBox != null && searchBox.isFocused();
             if (restoreSearch) searchCursor = searchBox.getCursorPosition();
+            restoreBookSearch = bookSearchBox != null && bookSearchBox.isFocused();
+            if (restoreBookSearch) bookSearchCursor = bookSearchBox.getCursorPosition();
             rebuildWidgets();
         }
     }
@@ -582,6 +820,16 @@ public final class VerdictScreen extends WorldScreen {
         if (s.navigationActive()) return guide(COLOR_GUIDE, "vv.guide.navigating");
         if (!s.ready() || s.identity() == null) return guide(COLOR_MUTED, "vv.guide.loading");
         if (page == 1) return guide(COLOR_GUIDE, "vv.guide.targets");
+        if (page == 2) {
+            var summary = bookSummary();
+            int totalBooks = summary.all().size();
+            int ownedBooks = summary.owned().size();
+            int missingBooks = summary.missing().size();
+            if (totalBooks > 0 && missingBooks == 0) {
+                return guide(COLOR_ACCENT, "vv.guide.booksComplete", totalBooks);
+            }
+            return guide(COLOR_GUIDE, "vv.guide.booksProgress", ownedBooks, totalBooks, missingBooks);
+        }
 
         var st = s.stats();
         long success = st.getOrDefault("success", 0L);
@@ -708,6 +956,22 @@ public final class VerdictScreen extends WorldScreen {
                     if (!stack.isEmpty()) {
                         targetIcons.add(new TargetIcon(stack, 14, top + 2 + (i - offset) * 24));
                     }
+                }
+            }
+        } else if (page == 2) {
+            var summary = bookSummary();
+            var list = filteredBooks(summary);
+            int top = listTop();
+            if (list.isEmpty()) {
+                String emptyKey = !bookQuery.isBlank()
+                    ? "vv.books.emptySearch"
+                    : (bookFilter == 0 ? "vv.books.emptyMissing" : "vv.books.emptyOwned");
+                drawMessagePanel(g, 12, top, width - 24, emptyKey);
+            } else {
+                int rows = Math.max(1, (height - top - 32) / 24);
+                ItemStack bookStack = Items.ENCHANTED_BOOK.getDefaultInstance();
+                for (int i = offset; i < Math.min(list.size(), offset + rows); i++) {
+                    targetIcons.add(new TargetIcon(bookStack, 14, top + 2 + (i - offset) * 24));
                 }
             }
         }
