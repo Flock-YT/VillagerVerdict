@@ -1,0 +1,24 @@
+Java 25.0.5, Minecraft 26.3, Fabric Loader 0.19.5; 2026-11-10
+Actual output excerpts; full logs remain in build/.
+JUnit: tests=87, failures=0, errors=0, skipped=0
+
+Before fix (expected regression failure)
+$ JAVA_HOME=/Users/eric/.sdkman/candidates/java/25.0.5.0+8-zulu ./gradlew runClientGameTest --console=plain
+java.lang.AssertionError: narrow product detail did not reconcile selection after seller unload
+[21:41:34] [Test thread/INFO] (Minecraft) [STDOUT]: VV_STABLE_SEARCH_PASS JECH=false four inputs, composition state, live updates, stable hover, bilingual layouts, search routing
+BUILD FAILED in 1m 17s
+
+After fix, without JECH
+$ JAVA_HOME=/Users/eric/.sdkman/candidates/java/25.0.5.0+8-zulu ./gradlew test runClientGameTest --console=plain
+[21:43:01] [Test thread/INFO] (Minecraft) [STDOUT]: VV_STABLE_SEARCH_PASS JECH=false four inputs, composition state, live updates, stable hover, bilingual layouts, search routing
+[21:43:02] [Test thread/INFO] (Minecraft) [STDOUT]: VV_MOBILE_PRODUCT_SELECTION_PASS JECH=false selected seller unload, fallback, empty results, navigation/edit controls
+[21:44:04] [Render thread/INFO] (Minecraft) [STDOUT]: VV_INTEGRATION_PASS manual capture, silent capture, safe close, GUI forms, inventory, no purchases
+BUILD SUCCESSFUL in 2m 22s
+
+After fix, with JECH 4.6.9
+$ JAVA_HOME=/Users/eric/.sdkman/candidates/java/25.0.5.0+8-zulu ./gradlew runClientGameTest -PwithJech=true --console=plain
+	- jecharacters 4.6.9
+[21:45:28] [Test thread/INFO] (Minecraft) [STDOUT]: VV_STABLE_SEARCH_PASS JECH=true four inputs, composition state, live updates, stable hover, bilingual layouts, search routing
+[21:45:29] [Test thread/INFO] (Minecraft) [STDOUT]: VV_MOBILE_PRODUCT_SELECTION_PASS JECH=true selected seller unload, fallback, empty results, navigation/edit controls
+[21:46:27] [Render thread/INFO] (Minecraft) [STDOUT]: VV_INTEGRATION_PASS manual capture, silent capture, safe close, GUI forms, inventory, no purchases
+BUILD SUCCESSFUL in 2m 17s

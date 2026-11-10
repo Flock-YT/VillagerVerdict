@@ -23,6 +23,10 @@ loom {
 
 
 repositories {
+    maven {
+        url = 'https://api.modrinth.com/maven'
+        content { includeGroup 'maven.modrinth' }
+    }
     // Add repositories to retrieve artifacts from in here.
     // You should only use this when depending on other mods because
     // Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
@@ -38,6 +42,12 @@ dependencies {
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    // Optional JECH integration. Use -PwithJech=true for an isolated integration-test run.
+    compileOnly 'maven.modrinth:I7k4B65h:fTpybBSu'
+    if (providers.gradleProperty('withJech').map { it.toBoolean() }.getOrElse(false)) {
+        localRuntime 'maven.modrinth:I7k4B65h:fTpybBSu'
+    }
 }
 
 processResources {

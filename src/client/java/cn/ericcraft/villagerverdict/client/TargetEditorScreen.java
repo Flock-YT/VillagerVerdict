@@ -5,7 +5,6 @@ import cn.ericcraft.villagerverdict.model.UiFormatting;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -20,6 +19,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.locale.Language;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
@@ -78,7 +78,17 @@ public final class TargetEditorScreen extends WorldScreen {
     private String pickerQuery = "";
     private int pickerOffset;
     private boolean restorePickerFocus;
-    private int pickerCursor;
+    private final LiveWidgets pickerWidgets = new LiveWidgets(this::addRenderableWidget, widget -> {
+        if (getFocused() == widget) setFocused(null);
+        removeWidget(widget);
+    });
+    private boolean refreshingPicker;
+    private Language catalogLanguage;
+    private Object catalogLevel;
+    private String catalogItemId = "";
+    private List<ItemOption> itemCatalog = List.of();
+    private List<EnchantOption> enchantCatalog = List.of();
+    private List<ItemOption> visibleItems = List.of();
 
     private record IconRow(ItemStack stack, int x, int y) {}
 
@@ -117,9 +127,11 @@ public final class TargetEditorScreen extends WorldScreen {
         priceBox = null;
         normalizeEnchantment();
         if (mode == Mode.PICK_ENCHANT && !canChooseEnchantment()) mode = Mode.FORM;
-        if (mode == Mode.FORM) initForm();
-        else if (mode == Mode.PICK_ITEM) initItemPicker();
-        else initEnchantPicker();
+        if (mode == Mode.FORM) {
+            pickerWidgets.begin(true);
+            pickerWidgets.end();
+            initForm();
+        } else refreshPicker(true);
     }
 
     private void initForm() {
@@ -138,7 +150,6 @@ public final class TargetEditorScreen extends WorldScreen {
                     pickerQuery = "";
                     pickerOffset = 0;
                     restorePickerFocus = true;
-                    pickerCursor = 0;
                     rebuildWidgets();
                 })
             .bounds(innerX + 22, 39, innerW - 22, 20)
@@ -213,7 +224,6 @@ public final class TargetEditorScreen extends WorldScreen {
                     pickerQuery = "";
                     pickerOffset = 0;
                     restorePickerFocus = true;
-                    pickerCursor = 0;
                     rebuildWidgets();
                 })
             .bounds(innerX, 74, innerW - clearW - 4, 20)
@@ -261,53 +271,58 @@ public final class TargetEditorScreen extends WorldScreen {
         plusLvl.active = !enchantmentId.isBlank() && minLevel < maxLevel;
     }
 
-    private void initItemPicker() {
-        int px = panelX();
-        int pw = panelWidth();
-        int innerX = px + 8;
-        int innerW = pw - 16;
+    private void refreshPicker(boolean reattach) {
+        if (refreshingPicker || mode == Mode.FORM) return;
+        refreshingPicker = true;
+        pickerWidgets.begin(reattach);
+        ensurePickerCatalog();
+        if (mode == Mode.PICK_ITEM) initItemPicker();
+        else initEnchantPicker();
+        pickerWidgets.end();
+        refreshingPicker = false;
+    }
 
-        pickerSearchBox = new EditBox(font, innerX, 30, innerW - 64, 20,
-            Component.translatable("vv.targetEditor.pickItemTitle"));
+    private void initPickerSearch(int reservedWidth, String titleKey, String hintKey) {
+        int innerX = panelX() + 8;
+        int innerW = panelWidth() - 16;
+        int searchWidth = innerW - reservedWidth;
+        pickerSearchBox = pickerWidgets.editBox("search:" + mode,
+            () -> new EditBox(font, innerX, 30, searchWidth, 20, Component.translatable(titleKey)),
+            innerX, 30, searchWidth);
+        if (!pickerSearchBox.getValue().equals(pickerQuery)) pickerSearchBox.setValue(pickerQuery);
         pickerSearchBox.setMaxLength(128);
-        pickerSearchBox.setValue(pickerQuery);
-        pickerSearchBox.setHint(Component.translatable("vv.targetEditor.searchItemHint"));
+        pickerSearchBox.setHint(ClientSearch.hint(hintKey));
+        pickerWidgets.tooltip(pickerSearchBox, ClientSearch.hint(hintKey));
         pickerSearchBox.setResponder(v -> {
             pickerQuery = v;
             pickerOffset = 0;
-            restorePickerFocus = true;
-            pickerCursor = pickerSearchBox.getCursorPosition();
-            rebuildWidgets();
+            refreshPicker(false);
         });
-        addRenderableWidget(pickerSearchBox);
         if (restorePickerFocus) {
             setFocused(pickerSearchBox);
-            pickerSearchBox.setCursorPosition(Math.min(pickerCursor, pickerQuery.length()));
             restorePickerFocus = false;
         }
+    }
 
-        addRenderableWidget(Button.builder(
-                Component.translatable("vv.targetEditor.backToForm"),
-                ignored -> {
-                    mode = Mode.FORM;
-                    rebuildWidgets();
-                })
-            .bounds(innerX + innerW - 60, 30, 60, 20)
-            .build());
-
+    private void initItemPicker() {
+        int innerX = panelX() + 8;
+        int innerW = panelWidth() - 16;
+        initPickerSearch(64, "vv.targetEditor.pickItemTitle", "vv.targetEditor.searchItemHint");
+        pickerWidgets.button("back", Component.translatable("vv.targetEditor.backToForm"),
+            innerX + innerW - 60, 30, 60, () -> {
+                mode = Mode.FORM;
+                rebuildWidgets();
+            });
         int quickCount = width >= 460 ? 6 : 4;
         int qw = (innerW - (quickCount - 1) * 4) / quickCount;
         for (int i = 0; i < quickCount; i++) {
             String qid = QUICK_PICK_ITEMS.get(i);
             String label = ClientDisplayText.itemDisplayName(qid);
-            addRenderableWidget(Button.builder(
-                    Component.literal(font.plainSubstrByWidth(label, qw - 8)),
-                    ignored -> selectItem(qid))
-                .bounds(innerX + i * (qw + 4), 54, qw, 18)
-                .build());
+            pickerWidgets.button("quick:" + qid, Component.literal(font.plainSubstrByWidth(label, qw - 8)),
+                innerX + i * (qw + 4), 54, qw, () -> selectItem(qid)).setHeight(18);
         }
-
         List<ItemOption> options = filteredItems();
+        visibleItems = options;
         int listTop = 78;
         int rows = Math.max(1, (height - listTop - 34) / 22);
         pickerOffset = Math.clamp(pickerOffset, 0, Math.max(0, options.size() - rows));
@@ -316,67 +331,32 @@ public final class TargetEditorScreen extends WorldScreen {
             int rowY = listTop + (i - pickerOffset) * 22;
             String label = opt.displayName();
             if (width >= 520) label += "  (" + opt.id() + ")";
-            addRenderableWidget(Button.builder(
-                    Component.literal(font.plainSubstrByWidth(label, innerW - 34)),
-                    ignored -> selectItem(opt.id()))
-                .bounds(innerX + 22, rowY, innerW - 22, 20)
-                .build());
+            pickerWidgets.button("item:" + opt.id(), Component.literal(font.plainSubstrByWidth(label, innerW - 34)),
+                innerX + 22, rowY, innerW - 22, () -> selectItem(opt.id()));
         }
         if (options.isEmpty() && pickerQuery.contains(":")) {
             String raw = pickerQuery.trim();
-            addRenderableWidget(Button.builder(
-                    Component.translatable("vv.targetEditor.useRawId", raw),
-                    ignored -> selectItem(raw))
-                .bounds(innerX, listTop, innerW, 20)
-                .build());
+            pickerWidgets.button("raw-item", Component.translatable("vv.targetEditor.useRawId", raw),
+                innerX, listTop, innerW, () -> selectItem(raw));
         }
     }
 
     private void initEnchantPicker() {
-        int px = panelX();
-        int pw = panelWidth();
-        int innerX = px + 8;
-        int innerW = pw - 16;
-
-        pickerSearchBox = new EditBox(font, innerX, 30, innerW - 122, 20,
-            Component.translatable("vv.targetEditor.pickEnchantTitle"));
-        pickerSearchBox.setMaxLength(128);
-        pickerSearchBox.setValue(pickerQuery);
-        pickerSearchBox.setHint(Component.translatable("vv.targetEditor.searchEnchantHint"));
-        pickerSearchBox.setResponder(v -> {
-            pickerQuery = v;
-            pickerOffset = 0;
-            restorePickerFocus = true;
-            pickerCursor = pickerSearchBox.getCursorPosition();
-            rebuildWidgets();
-        });
-        addRenderableWidget(pickerSearchBox);
-        if (restorePickerFocus) {
-            setFocused(pickerSearchBox);
-            pickerSearchBox.setCursorPosition(Math.min(pickerCursor, pickerQuery.length()));
-            restorePickerFocus = false;
-        }
-
-        addRenderableWidget(Button.builder(
-                Component.translatable("vv.clear"),
-                ignored -> {
-                    enchantmentId = "";
-                    minLevel = 1;
-                    mode = Mode.FORM;
-                    rebuildWidgets();
-                })
-            .bounds(innerX + innerW - 118, 30, 56, 20)
-            .build());
-
-        addRenderableWidget(Button.builder(
-                Component.translatable("vv.targetEditor.backToForm"),
-                ignored -> {
-                    mode = Mode.FORM;
-                    rebuildWidgets();
-                })
-            .bounds(innerX + innerW - 58, 30, 58, 20)
-            .build());
-
+        int innerX = panelX() + 8;
+        int innerW = panelWidth() - 16;
+        initPickerSearch(122, "vv.targetEditor.pickEnchantTitle", "vv.targetEditor.searchEnchantHint");
+        pickerWidgets.button("clear", Component.translatable("vv.clear"),
+            innerX + innerW - 118, 30, 56, () -> {
+                enchantmentId = "";
+                minLevel = 1;
+                mode = Mode.FORM;
+                rebuildWidgets();
+            });
+        pickerWidgets.button("back", Component.translatable("vv.targetEditor.backToForm"),
+            innerX + innerW - 58, 30, 58, () -> {
+                mode = Mode.FORM;
+                rebuildWidgets();
+            });
         List<EnchantOption> options = filteredEnchantments();
         int listTop = 56;
         int rows = Math.max(1, (height - listTop - 34) / 22);
@@ -386,16 +366,13 @@ public final class TargetEditorScreen extends WorldScreen {
             int rowY = listTop + (i - pickerOffset) * 22;
             String label = opt.displayName() + " · "
                 + Component.translatable("vv.targetEditor.maxLevelHint", opt.maxLevel()).getString();
-            addRenderableWidget(Button.builder(
-                    Component.literal(font.plainSubstrByWidth(label, innerW - 12)),
-                    ignored -> {
-                        enchantmentId = opt.id();
-                        minLevel = Math.clamp(minLevel, 1, opt.maxLevel());
-                        mode = Mode.FORM;
-                        rebuildWidgets();
-                    })
-                .bounds(innerX, rowY, innerW, 20)
-                .build());
+            pickerWidgets.button("enchant:" + opt.id(), Component.literal(font.plainSubstrByWidth(label, innerW - 12)),
+                innerX, rowY, innerW, () -> {
+                    enchantmentId = opt.id();
+                    minLevel = Math.clamp(minLevel, 1, opt.maxLevel());
+                    mode = Mode.FORM;
+                    rebuildWidgets();
+                });
         }
     }
 
@@ -406,46 +383,41 @@ public final class TargetEditorScreen extends WorldScreen {
         rebuildWidgets();
     }
 
-    private List<ItemOption> filteredItems() {
-        String q = pickerQuery.trim().toLowerCase(Locale.ROOT);
-        var list = new ArrayList<ItemOption>();
-        for (var holder : BuiltInRegistries.ITEM.listElements().toList()) {
-            var item = holder.value();
-            if (item == Items.AIR) continue;
-            String id = holder.getRegisteredName();
-            ItemStack stack = item.getDefaultInstance();
-            String name = stack.getHoverName().getString();
-            if (q.isEmpty()
-                    || name.toLowerCase(Locale.ROOT).contains(q)
-                    || id.toLowerCase(Locale.ROOT).contains(q)) {
-                int popIndex = POPULAR_ITEMS.indexOf(id);
-                list.add(new ItemOption(id, name, stack, popIndex >= 0));
+    private void ensurePickerCatalog() {
+        boolean reload = catalogLanguage != Language.getInstance() || catalogLevel != minecraft.level;
+        if (reload) {
+            catalogLanguage = Language.getInstance();
+            catalogLevel = minecraft.level;
+            var items = new ArrayList<ItemOption>();
+            for (var holder : BuiltInRegistries.ITEM.listElements().toList()) {
+                if (holder.value() == Items.AIR) continue;
+                String id = holder.getRegisteredName();
+                ItemStack stack = holder.value().getDefaultInstance();
+                items.add(new ItemOption(id, stack.getHoverName().getString(), stack, POPULAR_ITEMS.contains(id)));
             }
+            items.sort(Comparator.comparing((ItemOption o) -> !o.popular())
+                .thenComparingInt(o -> {
+                    int index = POPULAR_ITEMS.indexOf(o.id());
+                    return index < 0 ? Integer.MAX_VALUE : index;
+                }).thenComparing(ItemOption::displayName));
+            itemCatalog = List.copyOf(items);
         }
-        list.sort(Comparator
-            .comparing((ItemOption o) -> !o.popular())
-            .thenComparingInt(o -> {
-                int idx = POPULAR_ITEMS.indexOf(o.id());
-                return idx < 0 ? Integer.MAX_VALUE : idx;
-            })
-            .thenComparing(ItemOption::displayName));
-        return list;
+        if (reload || !itemId.equals(catalogItemId)) {
+            catalogItemId = itemId;
+            enchantCatalog = supportedEnchantments().map(holder -> new EnchantOption(holder.getRegisteredName(),
+                    holder.value().description().getString(), Math.max(1, holder.value().getMaxLevel())))
+                .sorted(Comparator.comparing(EnchantOption::displayName)).toList();
+        }
+    }
+
+    private List<ItemOption> filteredItems() {
+        return itemCatalog.stream().filter(o -> ClientSearch.contains(o.displayName(), pickerQuery)
+            || ClientSearch.contains(o.id(), pickerQuery)).toList();
     }
 
     private List<EnchantOption> filteredEnchantments() {
-        String q = pickerQuery.trim().toLowerCase(Locale.ROOT);
-        var list = new ArrayList<EnchantOption>();
-        supportedEnchantments().forEach(holder -> {
-            String id = holder.getRegisteredName();
-            String name = holder.value().description().getString();
-            if (q.isEmpty()
-                    || name.toLowerCase(Locale.ROOT).contains(q)
-                    || id.toLowerCase(Locale.ROOT).contains(q)) {
-                list.add(new EnchantOption(id, name, Math.max(1, holder.value().getMaxLevel())));
-            }
-        });
-        list.sort(Comparator.comparing(EnchantOption::displayName));
-        return list;
+        return enchantCatalog.stream().filter(o -> ClientSearch.contains(o.displayName(), pickerQuery)
+            || ClientSearch.contains(o.id(), pickerQuery)).toList();
     }
 
     private Stream<Holder.Reference<Enchantment>> supportedEnchantments() {
@@ -556,7 +528,7 @@ public final class TargetEditorScreen extends WorldScreen {
             }
         } else if (mode == Mode.PICK_ITEM) {
             int innerX = px + 8;
-            List<ItemOption> options = filteredItems();
+            List<ItemOption> options = visibleItems;
             int listTop = 78;
             int rows = Math.max(1, (height - listTop - 34) / 22);
             for (int i = pickerOffset; i < Math.min(options.size(), pickerOffset + rows); i++) {
@@ -575,10 +547,15 @@ public final class TargetEditorScreen extends WorldScreen {
     }
 
     @Override
+    public void tick() {
+        refreshPicker(false);
+    }
+
+    @Override
     public boolean mouseScrolled(double x, double y, double horiz, double vert) {
         if (mode != Mode.FORM) {
             pickerOffset = Math.max(0, pickerOffset - (int) Math.signum(vert));
-            rebuildWidgets();
+            refreshPicker(false);
             return true;
         }
         return super.mouseScrolled(x, y, horiz, vert);
@@ -596,7 +573,7 @@ public final class TargetEditorScreen extends WorldScreen {
                     || e.key() == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEUP) {
                 pickerOffset = Math.max(0,
                     pickerOffset + (e.key() == com.mojang.blaze3d.platform.InputConstants.KEY_PAGEDOWN ? 5 : -5));
-                rebuildWidgets();
+                refreshPicker(false);
                 return true;
             }
         }

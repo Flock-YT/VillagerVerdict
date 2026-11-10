@@ -14,6 +14,7 @@ import cn.ericcraft.villagerverdict.model.UiFormatting;
 import cn.ericcraft.villagerverdict.model.VillagerRecord;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -22,10 +23,10 @@ import java.util.UUID;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.locale.Language;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -71,16 +72,28 @@ public final class VerdictScreen extends WorldScreen {
     private boolean mobileDetailView;
     private int offset, detailOffset, sort, filter, bookFilter;
     private EditBox searchBox;
-    private boolean restoreSearch;
-    private int searchCursor;
     private String query = "";
     private EditBox bookSearchBox;
-    private boolean restoreBookSearch;
-    private int bookSearchCursor;
     private String bookQuery = "";
     private String productQueryId = "";
     private TargetTrade adHocProductQuery;
-    private int refresh;
+    private final LiveWidgets widgets = new LiveWidgets(this::addRenderableWidget, widget -> {
+        if (getFocused() == widget) setFocused(null);
+        removeWidget(widget);
+    });
+    private boolean refreshing;
+    private List<VillagerRecord> viewRecords = List.of();
+    private List<TargetTrade> viewTargets = List.of();
+    private List<EnchantmentStatus> viewBooks = List.of();
+    private Language catalogLanguage;
+    private Object catalogLevel;
+    private List<LibrarianEnchantments.CatalogEntry> bookCatalog = List.of();
+    private List<VillagerRecord> summaryRecords = List.of();
+    private LibrarianEnchantments.Summary cachedSummary;
+    private final Map<String, String> bookSearchTexts = new HashMap<>();
+    private final Map<UUID, SearchEntry> searchTexts = new HashMap<>();
+
+    private record SearchEntry(VillagerRecord record, String entityName, String text) {}
     private int detailMax, lastClickY = -1, lastClickX;
     private final List<Icon> icons = new ArrayList<>();
     private final List<TargetIcon> targetIcons = new ArrayList<>();
@@ -90,28 +103,6 @@ public final class VerdictScreen extends WorldScreen {
     private record TargetIcon(ItemStack stack, int x, int y) {}
 
     private record Guide(String text, int color) {}
-
-    private static final class DeleteTargetButton extends Button {
-        private DeleteTargetButton(int x, int y, String summary, OnPress onPress) {
-            super(x, y, 20, 20, Component.translatable("vv.target.delete", summary), onPress, DEFAULT_NARRATION);
-            setTooltip(Tooltip.create(getMessage()));
-        }
-
-        @Override
-        protected void extractContents(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
-            extractDefaultSprite(g);
-            int x = getX() + 5;
-            int y = getY() + 4;
-            int color = isHoveredOrFocused() ? 0xFFFF6677 : 0xFFE6EDF7;
-            g.fill(x + 3, y, x + 7, y + 1, color);
-            g.fill(x, y + 2, x + 10, y + 3, color);
-            g.fill(x + 1, y + 4, x + 2, y + 11, color);
-            g.fill(x + 8, y + 4, x + 9, y + 11, color);
-            g.fill(x + 1, y + 11, x + 9, y + 12, color);
-            g.fill(x + 4, y + 5, x + 5, y + 10, color);
-            g.fill(x + 6, y + 5, x + 7, y + 10, color);
-        }
-    }
 
     public VerdictScreen() {
         super(Component.translatable("vv.title"));
@@ -169,6 +160,18 @@ public final class VerdictScreen extends WorldScreen {
 
     @Override
     protected void init() {
+        refreshWidgets(true);
+    }
+
+    private void refreshWidgets() {
+        refreshWidgets(false);
+    }
+
+    private void refreshWidgets(boolean reattach) {
+        if (refreshing) return;
+        refreshing = true;
+        widgets.begin(reattach);
+        ensureSearchCatalog();
         searchBox = null;
         bookSearchBox = null;
         int tabW = tabWidth();
@@ -181,15 +184,18 @@ public final class VerdictScreen extends WorldScreen {
                 page = p;
                 mobileDetailView = false;
                 offset = detailOffset = 0;
-                rebuildWidgets();
+                refreshWidgets();
             });
         }
         int setW = settingsButtonWidth();
         var settingsBtn = button(Component.translatable("vv.settings"), width - 12 - setW, NAV_Y, setW,
             () -> SettingsScreen.open(this));
-        settingsBtn.setTooltip(Tooltip.create(Component.translatable("vv.settings.help")));
+        widgets.tooltip(settingsBtn, Component.translatable("vv.settings.help"));
 
         if (page == 0) {
+            viewRecords = filtered();
+            if (filterActive() && viewRecords.stream().noneMatch(v -> v.uuid().equals(s.selected)))
+                s.selected = viewRecords.isEmpty() ? null : viewRecords.getFirst().uuid();
             if (mobileDetail()) {
                 initMobileDetailBar();
             } else {
@@ -203,6 +209,8 @@ public final class VerdictScreen extends WorldScreen {
         }
 
         initBottomBar();
+        widgets.end();
+        refreshing = false;
     }
 
     private void initVillagerList() {
@@ -222,21 +230,19 @@ public final class VerdictScreen extends WorldScreen {
             chipsW = available;
         }
 
-        var search = new EditBox(font, 12, CONTENT_Y, searchW, 20, Component.translatable("vv.searchHint"));
-        search.setValue(query);
-        search.setHint(Component.translatable("vv.searchHint"));
-        search.setTooltip(Tooltip.create(Component.translatable("vv.search")));
+        var search = widgets.editBox("villager-search",
+            () -> new EditBox(font, 12, CONTENT_Y, searchW, 20, Component.translatable("vv.searchHint")),
+            12, CONTENT_Y, searchW);
+        if (!search.getValue().equals(query)) search.setValue(query);
+        search.setMaxLength(128);
+        search.setHint(ClientSearch.hint("vv.searchHint"));
+        widgets.tooltip(search, ClientSearch.hint("vv.search"));
         search.setResponder(v -> {
             query = v;
             offset = 0;
+            refreshWidgets();
         });
-        addRenderableWidget(search);
         searchBox = search;
-        if (restoreSearch) {
-            setFocused(search);
-            search.setCursorPosition(Math.min(searchCursor, query.length()));
-            restoreSearch = false;
-        }
 
         Component sortText = Component.translatable(
             "vv.sort.label", Component.translatable(SORTS[sort]).getString());
@@ -245,9 +251,9 @@ public final class VerdictScreen extends WorldScreen {
             12 + searchW + 4, CONTENT_Y, sortW,
             () -> {
                 sort = (sort + 1) % SORTS.length;
-                rebuildWidgets();
+                refreshWidgets();
             });
-        sortBtn.setTooltip(Tooltip.create(Component.translatable("vv.sort.help")));
+        widgets.tooltip(sortBtn, Component.translatable("vv.sort.help"));
 
         // Status filter chips with live counts.
         long[] counts = statusCounts();
@@ -265,9 +271,9 @@ public final class VerdictScreen extends WorldScreen {
                 () -> {
                     filter = f;
                     offset = 0;
-                    rebuildWidgets();
+                    refreshWidgets();
                 });
-            chip.setTooltip(Tooltip.create(Component.translatable(FILTER_HELP[i])));
+            widgets.tooltip(chip, Component.translatable(FILTER_HELP[i]));
         }
 
         if (filterActive()) {
@@ -278,13 +284,13 @@ public final class VerdictScreen extends WorldScreen {
                     productQueryId = "";
                     adHocProductQuery = null;
                     offset = 0;
-                    rebuildWidgets();
+                    refreshWidgets();
                 });
         }
 
         int top = listTop();
         int rows = Math.max(1, (listBottom() - top) / 24);
-        var records = filtered();
+        var records = viewRecords;
         offset = Math.clamp(offset, 0, Math.max(0, records.size() - rows));
         int lw = listWidth();
         for (int i = offset; i < Math.min(records.size(), offset + rows); i++) {
@@ -292,7 +298,7 @@ public final class VerdictScreen extends WorldScreen {
             var verdict = s.analysis.verdicts().get(v.uuid());
             boolean selectedRow = v.uuid().equals(s.selected);
             String rowText = villagerRowLabel(v, verdict, selectedRow);
-            var b = button(
+            var b = button("villager:" + v.uuid(),
                 Component.literal(font.plainSubstrByWidth(rowText, lw - 12))
                     .withColor(color(v, verdict)),
                 12,
@@ -302,12 +308,12 @@ public final class VerdictScreen extends WorldScreen {
                     s.selected = v.uuid();
                     detailOffset = 0;
                     if (!isWide()) mobileDetailView = true;
-                    rebuildWidgets();
+                    refreshWidgets();
                 });
             String tip = ClientDisplayText.statusLabel(s.displayStatus(v, verdict))
                 + " · (" + (int) v.x() + ", " + (int) v.y() + ", " + (int) v.z() + ")"
                 + (verdict == null ? "" : "\n" + reason(verdict.reason()));
-            b.setTooltip(Tooltip.create(Component.literal(tip)));
+            widgets.tooltip(b, Component.literal(tip));
         }
     }
 
@@ -319,19 +325,19 @@ public final class VerdictScreen extends WorldScreen {
         boolean hasSelection = s.record(s.selected) != null;
 
         var navBtn = button(fit("vv.navigate", bw), x, y, bw, this::locateSelected);
-        navBtn.setTooltip(Tooltip.create(Component.translatable("vv.navigate.help")));
+        widgets.tooltip(navBtn, Component.translatable("vv.navigate.help"));
         navBtn.active = hasSelection;
 
         var editBtn = button(fit("vv.edit", bw), x + bw + 4, y, bw, this::editSelected);
-        editBtn.setTooltip(Tooltip.create(Component.translatable("vv.edit.help")));
+        widgets.tooltip(editBtn, Component.translatable("vv.edit.help"));
         editBtn.active = hasSelection;
 
         var nextBtn = button(fit("vv.next", w - 2 * (bw + 4)), x + 2 * (bw + 4), y, w - 2 * (bw + 4), () -> {
             s.navigateNext();
             detailOffset = 0;
-            rebuildWidgets();
+            refreshWidgets();
         });
-        nextBtn.setTooltip(Tooltip.create(Component.translatable("vv.next.help")));
+        widgets.tooltip(nextBtn, Component.translatable("vv.next.help"));
     }
 
     private void initMobileDetailBar() {
@@ -343,32 +349,33 @@ public final class VerdictScreen extends WorldScreen {
 
         button(Component.translatable("vv.backToList"), 12, CONTENT_Y, backW, () -> {
             mobileDetailView = false;
-            rebuildWidgets();
+            refreshWidgets();
         });
 
         var navBtn = button(fit("vv.navigate", bw), 12 + backW + 4, CONTENT_Y, bw, this::locateSelected);
-        navBtn.setTooltip(Tooltip.create(Component.translatable("vv.navigate.help")));
+        widgets.tooltip(navBtn, Component.translatable("vv.navigate.help"));
         navBtn.active = hasSelection;
 
         var editBtn = button(fit("vv.edit", bw), 12 + backW + bw + 8, CONTENT_Y, bw, this::editSelected);
-        editBtn.setTooltip(Tooltip.create(Component.translatable("vv.edit.help")));
+        widgets.tooltip(editBtn, Component.translatable("vv.edit.help"));
         editBtn.active = hasSelection;
 
         var nextBtn = button(fit("vv.next", rest - 2 * bw), 12 + backW + 2 * bw + 12, CONTENT_Y, rest - 2 * bw,
             () -> {
                 s.navigateNext();
                 detailOffset = 0;
-                rebuildWidgets();
+                refreshWidgets();
             });
-        nextBtn.setTooltip(Tooltip.create(Component.translatable("vv.next.help")));
+        widgets.tooltip(nextBtn, Component.translatable("vv.next.help"));
     }
 
     private void initTargetsPage() {
         int addW = Math.min(170, font.width(Component.translatable("vv.target.add")) + 20);
         var addBtn = button(Component.translatable("vv.target.add"), 12, CONTENT_Y, addW, () -> openTargetEditor(null));
-        addBtn.setTooltip(Tooltip.create(Component.translatable("vv.target.add.help")));
+        widgets.tooltip(addBtn, Component.translatable("vv.target.add.help"));
 
-        var targets = s.targets;
+        var targets = List.copyOf(s.targets);
+        viewTargets = targets;
         int top = listTop();
         int rows = Math.max(1, (height - top - 32) / 24);
         offset = Math.clamp(offset, 0, Math.max(0, targets.size() - rows));
@@ -380,12 +387,12 @@ public final class VerdictScreen extends WorldScreen {
             int rowY = top + (i - offset) * 24;
             String summary = ClientDisplayText.targetSummary(t);
             int mainW = viewX - 4 - 34;
-            var row = button(
+            var row = button("target:" + t.id(),
                 Component.literal(font.plainSubstrByWidth(summary, mainW - 10)),
                 34, rowY, mainW,
                 () -> openTargetEditor(t));
-            row.setTooltip(Tooltip.create(Component.translatable("vv.target.editHint")));
-            var view = button(Component.translatable("vv.target.viewVillagers"), viewX, rowY, viewW, () -> {
+            widgets.tooltip(row, Component.translatable("vv.target.editHint"));
+            var view = button("target-view:" + t.id(), Component.translatable("vv.target.viewVillagers"), viewX, rowY, viewW, () -> {
                 productQueryId = t.id();
                 adHocProductQuery = null;
                 page = 0;
@@ -394,13 +401,14 @@ public final class VerdictScreen extends WorldScreen {
                 filter = 0;
                 offset = detailOffset = 0;
                 s.selected = filtered().stream().map(VillagerRecord::uuid).findFirst().orElse(null);
-                rebuildWidgets();
+                refreshWidgets();
             });
-            view.setTooltip(Tooltip.create(Component.translatable("vv.target.viewVillagers.help")));
-            addRenderableWidget(new DeleteTargetButton(deleteX, rowY, summary, ignored -> {
-                updateTarget(t.id(), null);
-                rebuildWidgets();
-            }));
+            widgets.tooltip(view, Component.translatable("vv.target.viewVillagers.help"));
+            widgets.trash("target-delete:" + t.id(), Component.translatable("vv.target.delete", summary),
+                deleteX, rowY, () -> {
+                    updateTarget(t.id(), null);
+                    refreshWidgets();
+                });
         }
     }
 
@@ -419,24 +427,19 @@ public final class VerdictScreen extends WorldScreen {
             chipsW = available;
         }
 
-        var search = new EditBox(font, 12, CONTENT_Y, searchW, 20, Component.translatable("vv.books.searchHint"));
-        search.setValue(bookQuery);
-        search.setHint(Component.translatable("vv.books.searchHint"));
-        search.setTooltip(Tooltip.create(Component.translatable("vv.books.search")));
+        var search = widgets.editBox("book-search",
+            () -> new EditBox(font, 12, CONTENT_Y, searchW, 20, Component.translatable("vv.books.searchHint")),
+            12, CONTENT_Y, searchW);
+        if (!search.getValue().equals(bookQuery)) search.setValue(bookQuery);
+        search.setMaxLength(128);
+        search.setHint(ClientSearch.hint("vv.books.searchHint"));
+        widgets.tooltip(search, ClientSearch.hint("vv.books.search"));
         search.setResponder(v -> {
             bookQuery = v;
             offset = 0;
-            restoreBookSearch = true;
-            bookSearchCursor = search.getCursorPosition();
-            rebuildWidgets();
+            refreshWidgets();
         });
-        addRenderableWidget(search);
         bookSearchBox = search;
-        if (restoreBookSearch) {
-            setFocused(search);
-            search.setCursorPosition(Math.min(bookSearchCursor, bookQuery.length()));
-            restoreBookSearch = false;
-        }
 
         var summary = bookSummary();
         int[] counts = {summary.missing().size(), summary.owned().size(), summary.all().size()};
@@ -454,12 +457,13 @@ public final class VerdictScreen extends WorldScreen {
                 () -> {
                     bookFilter = f;
                     offset = 0;
-                    rebuildWidgets();
+                    refreshWidgets();
                 });
-            chip.setTooltip(Tooltip.create(Component.translatable(BOOK_FILTER_HELP[i])));
+            widgets.tooltip(chip, Component.translatable(BOOK_FILTER_HELP[i]));
         }
 
         var list = filteredBooks(summary);
+        viewBooks = list;
         int top = listTop();
         int rows = Math.max(1, (height - top - 32) / 24);
         offset = Math.clamp(offset, 0, Math.max(0, list.size() - rows));
@@ -474,26 +478,26 @@ public final class VerdictScreen extends WorldScreen {
             int rowY = top + (i - offset) * 24;
             String rowText = bookRowLabel(status);
             int rowColor = bookRowColor(status);
-            var rowBtn = button(
+            var rowBtn = button("book:" + status.id(),
                 Component.literal(font.plainSubstrByWidth(rowText, mainW - 10)).withColor(rowColor),
                 34, rowY, mainW,
                 () -> onBookRowClick(status));
-            rowBtn.setTooltip(Tooltip.create(Component.literal(bookRowTooltip(status))));
+            widgets.tooltip(rowBtn, Component.literal(bookRowTooltip(status)));
 
             if (status.owned()) {
-                var viewBtn = button(
+                var viewBtn = button("book-view:" + status.id(),
                     Component.translatable("vv.target.viewVillagers"),
                     width - 12 - actionW, rowY, actionW,
                     () -> viewVillagersForBook(status, status.maxLevel()));
-                viewBtn.setTooltip(Tooltip.create(Component.translatable("vv.target.viewVillagers.help")));
+                widgets.tooltip(viewBtn, Component.translatable("vv.target.viewVillagers.help"));
             } else {
                 boolean tracked = isBookTracked(status);
-                var trackBtn = button(
+                var trackBtn = button("book-track:" + status.id(),
                     Component.translatable(tracked ? "vv.books.addedTarget" : "vv.books.addTarget"),
                     width - 12 - actionW, rowY, actionW,
                     () -> trackBook(status));
                 trackBtn.active = !tracked;
-                trackBtn.setTooltip(Tooltip.create(Component.translatable("vv.books.addTarget.help")));
+                widgets.tooltip(trackBtn, Component.translatable("vv.books.addTarget.help"));
             }
         }
     }
@@ -508,9 +512,9 @@ public final class VerdictScreen extends WorldScreen {
         int scanW = Math.min(116, Math.max(56, avail * 38 / 100));
         var scanBtn = button(Component.translatable("vv.scan"), 12, y, scanW, () -> {
             s.scan();
-            rebuildWidgets();
+            refreshWidgets();
         });
-        scanBtn.setTooltip(Tooltip.create(Component.translatable("vv.scan.help")));
+        widgets.tooltip(scanBtn, Component.translatable("vv.scan.help"));
 
         boolean running = s.probe.running();
         int probeW = Math.min(170, Math.max(40, avail - scanW - 4));
@@ -520,17 +524,17 @@ public final class VerdictScreen extends WorldScreen {
                 .withColor(running ? COLOR_ACCENT : 0xFFFFFFFF),
             12 + scanW + 4, y, probeW, () -> {
                 SettingsScreen.toggleProbe(ShortcutActions::show);
-                rebuildWidgets();
+                refreshWidgets();
             });
-        probeBtn.setTooltip(Tooltip.create(Component.translatable("vv.probe.help")));
+        widgets.tooltip(probeBtn, Component.translatable("vv.probe.help"));
 
         if (s.navigationActive()) {
             var cancelBtn = button(Component.translatable("vv.cancelNavigate"),
                 width - doneW - 16 - cancelW, y, cancelW, () -> {
                     s.cancelNavigation();
-                    rebuildWidgets();
+                    refreshWidgets();
                 });
-            cancelBtn.setTooltip(Tooltip.create(Component.translatable("vv.cancelNavigate.help")));
+            widgets.tooltip(cancelBtn, Component.translatable("vv.cancelNavigate.help"));
         }
         button(Component.translatable("gui.done"), width - doneW - 12, y, doneW, this::onClose);
     }
@@ -540,8 +544,11 @@ public final class VerdictScreen extends WorldScreen {
     }
 
     private Button button(Component text, int x, int y, int w, Runnable action) {
-        return addRenderableWidget(
-            Button.builder(text, b -> action.run()).bounds(x, y, Math.max(20, w), 20).build());
+        return button("page:" + page + ":control:" + x + ":" + y, text, x, y, w, action);
+    }
+
+    private Button button(String key, Component text, int x, int y, int w, Runnable action) {
+        return widgets.button(key, text, x, y, Math.max(20, w), action);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -585,9 +592,13 @@ public final class VerdictScreen extends WorldScreen {
     }
 
     private LibrarianEnchantments.Summary bookSummary() {
-        var catalog = ClientDisplayText.tradeableEnchantments();
+        ensureSearchCatalog();
         var enabledRecords = s.records().stream().filter(s::enabled).toList();
-        return LibrarianEnchantments.analyze(catalog, enabledRecords);
+        if (cachedSummary == null || !summaryRecords.equals(enabledRecords)) {
+            cachedSummary = LibrarianEnchantments.analyze(bookCatalog, enabledRecords);
+            summaryRecords = enabledRecords;
+        }
+        return cachedSummary;
     }
 
     private List<EnchantmentStatus> filteredBooks(LibrarianEnchantments.Summary summary) {
@@ -605,11 +616,10 @@ public final class VerdictScreen extends WorldScreen {
         if (q.isEmpty()) return source;
         return source.stream()
             .filter(st -> {
-                String name = ClientDisplayText.enchantmentDisplayName(st.id()).toLowerCase(Locale.ROOT);
-                String full = ClientDisplayText.enchantmentFullName(st.id(), st.maxLevel()).toLowerCase(Locale.ROOT);
-                return name.contains(q)
-                    || full.contains(q)
-                    || st.id().toLowerCase(Locale.ROOT).contains(q);
+                String text = bookSearchTexts.computeIfAbsent(st.id(), id ->
+                    ClientDisplayText.enchantmentDisplayName(id) + " "
+                        + ClientDisplayText.enchantmentFullName(id, st.maxLevel()) + " " + id);
+                return ClientSearch.contains(text, q);
             })
             .toList();
     }
@@ -681,7 +691,7 @@ public final class VerdictScreen extends WorldScreen {
         } else {
             s.selected = filtered().stream().map(VillagerRecord::uuid).findFirst().orElse(null);
         }
-        rebuildWidgets();
+        refreshWidgets();
     }
 
     private boolean isBookTracked(EnchantmentStatus status) {
@@ -700,7 +710,7 @@ public final class VerdictScreen extends WorldScreen {
             status.maxLevel(),
             0);
         updateTarget(target.id(), target);
-        rebuildWidgets();
+        refreshWidgets();
     }
 
     private void updateTarget(String id, TargetTrade t) {
@@ -714,18 +724,7 @@ public final class VerdictScreen extends WorldScreen {
 
     @Override
     public void tick() {
-        if (++refresh % 20 == 0) {
-            if (page == 0 && filterActive()) {
-                var matches = filtered();
-                if (matches.stream().noneMatch(v -> v.uuid().equals(s.selected)))
-                    s.selected = matches.isEmpty() ? null : matches.getFirst().uuid();
-            }
-            restoreSearch = searchBox != null && searchBox.isFocused();
-            if (restoreSearch) searchCursor = searchBox.getCursorPosition();
-            restoreBookSearch = bookSearchBox != null && bookSearchBox.isFocused();
-            if (restoreBookSearch) bookSearchCursor = bookSearchBox.getCursorPosition();
-            rebuildWidgets();
-        }
+        refreshWidgets();
     }
 
     /** Villagers matching product query and search — before the status filter is applied. */
@@ -735,7 +734,7 @@ public final class VerdictScreen extends WorldScreen {
         return s.records().stream()
             .filter(s::enabled)
             .filter(v -> productQuery == null || productQuery.matches(v))
-            .filter(v -> q.isEmpty() || search(v).contains(q))
+            .filter(v -> q.isEmpty() || ClientSearch.contains(search(v), q))
             .toList();
     }
 
@@ -773,22 +772,28 @@ public final class VerdictScreen extends WorldScreen {
         return list.stream().sorted(order.thenComparing(v -> v.uuid().toString())).toList();
     }
 
+    private void ensureSearchCatalog() {
+        if (catalogLanguage == Language.getInstance() && catalogLevel == minecraft.level) return;
+        catalogLanguage = Language.getInstance();
+        catalogLevel = minecraft.level;
+        bookCatalog = ClientDisplayText.tradeableEnchantments();
+        cachedSummary = null;
+        bookSearchTexts.clear();
+        searchTexts.clear();
+    }
+
     private String search(VillagerRecord v) {
-        return (profession(v)
-            + (minecraft.level == null || minecraft.level.getEntity(v.uuid()) == null ? ""
-                : minecraft.level.getEntity(v.uuid()).getName().getString())
-            + v.profession()
-            + v.level()
-            + v.note()
-            + v.tags()
-            + (v.snapshot() == null
-                ? ""
-                : ProfessionHighlights.trades(v).stream()
-                    .map(t -> t.toString()
-                        + ItemCodecAdapter.displayName(t.output())
-                        + ItemCodecAdapter.enchantmentText(t.output()))
-                    .toList()))
-            .toLowerCase(Locale.ROOT);
+        String entityName = minecraft.level == null || minecraft.level.getEntity(v.uuid()) == null ? ""
+            : minecraft.level.getEntity(v.uuid()).getName().getString();
+        var cached = searchTexts.get(v.uuid());
+        if (cached != null && cached.record().equals(v) && cached.entityName().equals(entityName)) return cached.text();
+        String text = profession(v) + " " + entityName + " " + v.profession() + " " + v.level()
+            + " " + v.note() + " " + v.tags()
+            + (v.snapshot() == null ? "" : ProfessionHighlights.trades(v).stream()
+                .map(t -> t.toString() + ItemCodecAdapter.displayName(t.output())
+                    + ItemCodecAdapter.enchantmentText(t.output())).toList());
+        searchTexts.put(v.uuid(), new SearchEntry(v, entityName, text));
+        return text;
     }
 
     private Map<String, Double> priceVector(VillagerRecord v) {
@@ -924,7 +929,7 @@ public final class VerdictScreen extends WorldScreen {
                 g.text(font, font.plainSubstrByWidth(caption, width - 36 - clearW), 12, toolbarBottom() + 6, COLOR_MUTED);
             }
 
-            var records = mobileDetail() ? List.<VillagerRecord>of() : filtered();
+            var records = mobileDetail() ? List.<VillagerRecord>of() : viewRecords;
             boolean noneNearby = s.records().stream().noneMatch(s::enabled);
             if (isWide()) {
                 int panelTop = listTop();
@@ -973,7 +978,7 @@ public final class VerdictScreen extends WorldScreen {
                 }
             }
         } else if (page == 1) {
-            var targets = s.targets;
+            var targets = viewTargets;
             int top = listTop();
             if (targets.isEmpty()) {
                 drawMessagePanel(g, 12, top, width - 24, "vv.emptyTargets");
@@ -987,8 +992,7 @@ public final class VerdictScreen extends WorldScreen {
                 }
             }
         } else if (page == 2) {
-            var summary = bookSummary();
-            var list = filteredBooks(summary);
+            var list = viewBooks;
             int top = listTop();
             if (list.isEmpty()) {
                 String emptyKey = !bookQuery.isBlank()
@@ -1221,7 +1225,7 @@ public final class VerdictScreen extends WorldScreen {
             detailOffset = Math.clamp(detailOffset - (int) (b * 24), 0, detailMax);
         } else {
             offset = Math.max(0, offset - (int) Math.signum(b));
-            rebuildWidgets();
+            refreshWidgets();
         }
         return true;
     }

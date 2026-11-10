@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="cn.ericcraft.villagerverdict.SearchTextTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-10T13:10:57.425Z" hostname="Mac-Mini.local" time="0.001">
+  <properties/>
+  <testcase name="delegatesNormalizedTextWithoutDependingOnSystemLocale()" classname="cn.ericcraft.villagerverdict.SearchTextTest" time="0.0"/>
+  <testcase name="emptyQueriesSkipOptionalMatcherAndDecisionsAreNotCached()" classname="cn.ericcraft.villagerverdict.SearchTextTest" time="0.0"/>
+  <testcase name="ordinarySearchPreservesChineseEnglishAndResourceIds()" classname="cn.ericcraft.villagerverdict.SearchTextTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

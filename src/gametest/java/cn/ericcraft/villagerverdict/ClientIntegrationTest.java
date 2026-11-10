@@ -52,6 +52,8 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       testSignatureProducts(c, server);
       testSignatureDetails(c, server);
       testProductEditingAndDeletion(c);
+      testStableSearch(c, server);
+      testMobileProductSelection(c, server);
       testContinuousThreeStates(c, server, connection);
       UUID id =
           server.computeOnServer(
@@ -1667,6 +1669,310 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       chars.accept((position, style, codepoint) -> { text.appendCodePoint(codepoint); return true; });
     });
     return text.toString();
+  }
+
+  private void testMobileProductSelection(ClientGameTestContext c, TestServerContext server) {
+    int originalScale = c.computeOnClient(mc -> mc.options.guiScale().get());
+    var originalTargets = c.computeOnClient(mc -> List.copyOf(VerdictService.INSTANCE.targets));
+    boolean jech = c.computeOnClient(mc -> net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("jecharacters"));
+    var ids = server.computeOnServer(s -> {
+      var result = new ArrayList<UUID>();
+      for (int x : new int[] {2, 3}) {
+        var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+        v.setNoAi(true);
+        v.setPos(x, -60, 2);
+        setProfession(v, VillagerProfession.LIBRARIAN);
+        var offers = new MerchantOffers();
+        offers.add(enchantedOffer(s.overworld(), net.minecraft.world.item.enchantment.Enchantments.MENDING, 1, 12));
+        v.setOffers(offers);
+        s.overworld().addFreshEntity(v);
+        result.add(v.getUUID());
+      }
+      return result;
+    });
+    try {
+      c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) != null));
+      c.runOnClient(mc -> VerdictService.INSTANCE.scan());
+      for (UUID id : ids) captureTrades(c, id);
+      c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending());
+      c.runOnClient(mc -> {
+        VerdictService.INSTANCE.targets = List.of(new TargetTrade(
+            "mobile-selection", "minecraft:enchanted_book", "minecraft:mending", 1, 0));
+        VerdictService.INSTANCE.changed();
+        mc.options.guiScale().set(2);
+        mc.resizeGui();
+        mc.gui.setScreen(new VerdictScreen());
+        if (mc.gui.screen().width >= 640) throw new AssertionError("selection fixture is not narrow");
+      });
+      c.clickScreenButton("vv.targets");
+      c.clickScreenButton("vv.target.viewVillagers");
+      var screen = c.computeOnClient(mc -> mc.gui.screen());
+      UUID selected = c.computeOnClient(mc -> VerdictService.INSTANCE.selected);
+      if (!ids.contains(selected)) throw new AssertionError("product query did not select a fixture villager");
+      UUID remaining = ids.stream().filter(id -> !id.equals(selected)).findFirst().orElseThrow();
+      clickButtonPrefix(c, "▸ ");
+      // Keep the list hidden while the selected seller and then the last seller unload.
+      for (UUID removed : List.of(selected, remaining)) {
+        server.runOnServer(s -> s.overworld().getEntity(removed).discard());
+        c.waitFor(mc -> mc.level.getEntity(removed) == null && VerdictService.INSTANCE.record(removed) == null);
+        c.waitTicks(2);
+        UUID expected = removed.equals(selected) ? remaining : null;
+        c.runOnClient(mc -> {
+          if (mc.gui.screen() != screen || !(boolean) privateField(screen, "mobileDetailView"))
+            throw new AssertionError("unload left the narrow detail page");
+          if (!Objects.equals(VerdictService.INSTANCE.selected, expected))
+            throw new AssertionError("narrow product detail did not reconcile selection after seller unload");
+          @SuppressWarnings("unchecked")
+          var matches = (List<VillagerRecord>) privateField(screen, "viewRecords");
+          if (!matches.stream().map(VillagerRecord::uuid).toList().equals(expected == null ? List.of() : List.of(expected)))
+            throw new AssertionError("narrow detail retained stale product results");
+          var controls = screenButtons(screen).stream().filter(b -> b.getY() == 58)
+              .sorted(Comparator.comparingInt(Button::getX)).toList();
+          if (controls.size() != 4 || controls.get(1).active != (expected != null)
+              || controls.get(2).active != (expected != null))
+            throw new AssertionError("narrow navigation/edit controls do not reflect the remaining selection");
+        });
+        c.takeScreenshot("mobile-product-selection-" + (expected == null ? "empty" : "fallback") + "-jech-" + jech);
+      }
+    } finally {
+      c.runOnClient(mc -> {
+        mc.gui.setScreen(null);
+        VerdictService.INSTANCE.targets = new ArrayList<>(originalTargets);
+        VerdictService.INSTANCE.changed();
+        mc.options.guiScale().set(originalScale);
+        mc.resizeGui();
+      });
+      server.runOnServer(s -> ids.forEach(id -> {
+        var entity = s.overworld().getEntity(id);
+        if (entity != null) entity.discard();
+      }));
+      c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) == null));
+      c.runOnClient(mc -> VerdictService.INSTANCE.scan());
+    }
+    System.out.println("VV_MOBILE_PRODUCT_SELECTION_PASS JECH=" + jech + " selected seller unload, fallback, empty results, navigation/edit controls");
+  }
+
+  private void testStableSearch(ClientGameTestContext c, TestServerContext server) {
+    boolean jech = c.computeOnClient(mc -> net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("jecharacters"));
+    int originalScale = c.computeOnClient(mc -> mc.options.guiScale().get());
+    var originalTargets = c.computeOnClient(mc -> List.copyOf(VerdictService.INSTANCE.targets));
+    UUID id = server.computeOnServer(s -> {
+      var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+      v.setNoAi(true);
+      v.setPos(2, -60, 2);
+      setProfession(v, VillagerProfession.LIBRARIAN);
+      v.setCustomName(Component.literal("经验修补主力"));
+      var offers = new MerchantOffers();
+      offers.add(enchantedOffer(s.overworld(), net.minecraft.world.item.enchantment.Enchantments.MENDING, 1, 12));
+      v.setOffers(offers);
+      s.overworld().addFreshEntity(v);
+      return v.getUUID();
+    });
+    c.waitFor(mc -> mc.level.getEntity(id) != null);
+    c.runOnClient(mc -> VerdictService.INSTANCE.scan());
+    captureTrades(c, id);
+    c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending());
+    reloadSearchLanguage(c, "zh_cn");
+    c.runOnClient(mc -> {
+      mc.options.guiScale().set(2);
+      mc.resizeGui();
+      VerdictService.INSTANCE.edit(VerdictService.INSTANCE.record(id).withManual(
+          VillagerRecord.Manual.AUTO, "主力经验修补", Set.of("玻璃补货")));
+      mc.gui.setScreen(new VerdictScreen());
+    });
+    for (String q : List.of("经验修补", "minecraft:mending", "jingyanxiubu", "JYXB", "经验xiubu")) {
+      setTargetPickerQuery(c, q);
+      c.runOnClient(mc -> {
+        @SuppressWarnings("unchecked")
+        var matches = (List<VillagerRecord>) privateField(mc.gui.screen(), "viewRecords");
+        boolean expected = jech || q.equals("经验修补") || q.equals("minecraft:mending");
+        if (matches.stream().anyMatch(v -> v.uuid().equals(id)) != expected)
+          throw new AssertionError("villager search mismatch: " + q + " JECH=" + jech);
+      });
+    }
+    assertStableSearchBox(c, "经验修补");
+    setTargetPickerQuery(c, "经验修补");
+    c.runOnClient(mc -> VerdictService.INSTANCE.selected = id);
+    c.waitTicks(1);
+    var hovered = c.computeOnClient(mc -> screenButtons(mc.gui.screen()).stream()
+        .filter(b -> b.getY() >= 100 && b.getY() < mc.gui.screen().height - 44).findFirst().orElseThrow());
+    var tooltip = c.computeOnClient(mc -> widgetTooltip(hovered));
+    var cursor = c.computeOnClient(mc -> new double[] {
+        (hovered.getX() + 20) * (double) mc.getWindow().getScreenWidth() / mc.gui.screen().width,
+        (hovered.getY() + 10) * (double) mc.getWindow().getScreenHeight() / mc.gui.screen().height});
+    c.getInput().setCursorPos(cursor[0], cursor[1]);
+    c.waitTicks(25);
+    c.takeScreenshot("stable-search-hover-before-jech-" + jech);
+    for (boolean running : new boolean[] {false, true, false}) {
+      c.runOnClient(mc -> {
+        if (running) VerdictService.INSTANCE.probe.run();
+        else VerdictService.INSTANCE.probe.pause();
+        VerdictService.INSTANCE.scan();
+      });
+      c.waitTicks(25);
+      c.runOnClient(mc -> {
+        if (!mc.gui.screen().children().contains(hovered) || widgetTooltip(hovered) != tooltip || !hovered.isHovered())
+          throw new AssertionError("hover stability: row=" + mc.gui.screen().children().contains(hovered)
+              + " tooltip=" + (widgetTooltip(hovered) == tooltip) + " hovered=" + hovered.isHovered());
+      });
+    }
+    c.takeScreenshot("stable-search-hover-after-jech-" + jech);
+    c.runOnClient(mc -> VerdictService.INSTANCE.edit(VerdictService.INSTANCE.record(id).withManual(
+        VillagerRecord.Manual.KEEP, "改名后可搜索", Set.of("测试标签"))));
+    setTargetPickerQuery(c, "改名后可搜索");
+    c.runOnClient(mc -> {
+      @SuppressWarnings("unchecked")
+      var matches = (List<VillagerRecord>) privateField(mc.gui.screen(), "viewRecords");
+      if (matches.stream().noneMatch(v -> v.uuid().equals(id))) throw new AssertionError("search text cache ignored annotation change");
+    });
+    c.clickScreenButton("vv.books");
+    clickButtonContaining(c, Component.translatable("vv.books.filter.all").getString());
+    for (String q : List.of("经验修补", "minecraft:mending", "jingyanxiubu", "jyxb", "经验xiubu")) {
+      setTargetPickerQuery(c, q);
+      c.runOnClient(mc -> {
+        @SuppressWarnings("unchecked")
+        var matches = (List<cn.ericcraft.villagerverdict.analysis.LibrarianEnchantments.EnchantmentStatus>)
+            privateField(mc.gui.screen(), "viewBooks");
+        boolean expected = jech || q.equals("经验修补") || q.equals("minecraft:mending");
+        if (matches.stream().anyMatch(v -> v.id().equals("minecraft:mending")) != expected)
+          throw new AssertionError("book search mismatch: " + q + " JECH=" + jech);
+      });
+    }
+    assertStableSearchBox(c, "经验修补");
+    for (int scale : new int[] {1, 2}) {
+      c.runOnClient(mc -> { mc.options.guiScale().set(scale); mc.resizeGui(); });
+      setTargetPickerQuery(c, jech ? "jyxb" : "经验修补");
+      c.takeScreenshot("stable-search-books-zh_cn-" + scale + "-jech-" + jech);
+    }
+    c.clickScreenButton("vv.targets");
+    c.clickScreenButton("vv.target.add");
+    clickButtonContaining(c, Component.translatable("vv.targetEditor.changeItem").getString());
+    for (String q : List.of("玻璃", "minecraft:glass", "boli", "BL", "bo璃")) {
+      setTargetPickerQuery(c, q);
+      c.runOnClient(mc -> {
+        String name = ClientDisplayText.itemDisplayName("minecraft:glass");
+        boolean found = screenButtons(mc.gui.screen()).stream().anyMatch(b -> b.getY() >= 78 && b.getMessage().getString().startsWith(name));
+        boolean expected = jech || q.equals("玻璃") || q.equals("minecraft:glass");
+        if (found != expected) throw new AssertionError("item search mismatch: " + q + " JECH=" + jech);
+      });
+    }
+    assertStableSearchBox(c, "玻璃");
+    setTargetPickerQuery(c, jech ? "boli" : "玻璃");
+    c.takeScreenshot("stable-search-items-zh_cn-jech-" + jech);
+    c.clickScreenButton("vv.targetEditor.backToForm");
+    openTargetEnchantPicker(c);
+    for (String q : List.of("经验修补", "minecraft:mending", "jingyanxiubu", "jyxb", "经验xiubu")) {
+      setTargetPickerQuery(c, q);
+      c.runOnClient(mc -> {
+        String name = ClientDisplayText.enchantmentDisplayName("minecraft:mending");
+        boolean found = screenButtons(mc.gui.screen()).stream().anyMatch(b -> b.getY() >= 56 && b.getMessage().getString().startsWith(name));
+        boolean expected = jech || q.equals("经验修补") || q.equals("minecraft:mending");
+        if (found != expected) throw new AssertionError("enchantment search mismatch: " + q + " JECH=" + jech);
+      });
+    }
+    assertStableSearchBox(c, "经验修补");
+    if (jech) testJechSearchConfiguration(c);
+    setTargetPickerQuery(c, jech ? "jyxb" : "经验修补");
+    c.takeScreenshot("stable-search-enchantments-zh_cn-jech-" + jech);
+    c.clickScreenButton("vv.targetEditor.backToForm");
+    c.clickScreenButton("gui.cancel");
+    reloadSearchLanguage(c, "en_us");
+    c.setScreen(VerdictScreen::new);
+    c.clickScreenButton("vv.books");
+    clickButtonContaining(c, Component.translatable("vv.books.filter.all").getString());
+    setTargetPickerQuery(c, "MENDING");
+    c.takeScreenshot("stable-search-books-en_us-jech-" + jech);
+    c.runOnClient(mc -> {
+      if (!renderedScreenText(mc).contains("Mending")) throw new AssertionError("language reload retained Chinese search catalog");
+      VerdictService.INSTANCE.targets = new ArrayList<>(originalTargets);
+      VerdictService.INSTANCE.changed();
+      mc.gui.setScreen(null);
+      mc.options.guiScale().set(originalScale);
+      mc.resizeGui();
+    });
+    server.runOnServer(s -> s.overworld().getEntity(id).discard());
+    c.waitFor(mc -> mc.level.getEntity(id) == null);
+    c.runOnClient(mc -> VerdictService.INSTANCE.scan());
+    System.out.println("VV_STABLE_SEARCH_PASS JECH=" + jech + " four inputs, composition state, live updates, stable hover, bilingual layouts, search routing");
+  }
+
+  private void reloadSearchLanguage(ClientGameTestContext c, String language) {
+    var reload = c.computeOnClient(mc -> {
+      mc.getLanguageManager().setSelected(language);
+      mc.options.languageCode = language;
+      return mc.reloadResourcePacks();
+    });
+    c.waitFor(mc -> reload.isDone() && mc.gui.overlay() == null, 600);
+  }
+
+  private void assertStableSearchBox(ClientGameTestContext c, String text) {
+    var screen = c.computeOnClient(mc -> mc.gui.screen());
+    var box = c.computeOnClient(mc -> targetInput(screen));
+    c.runOnClient(mc -> { box.setValue(""); screen.setFocused(box); });
+    for (int codepoint : text.codePoints().toArray()) {
+      c.getInput().typeChar(codepoint);
+      c.runOnClient(mc -> {
+        if (targetInput(screen) != box || screen.getFocused() != box || !box.isFocused())
+          throw new AssertionError("typing replaced or unfocused search box");
+      });
+    }
+    c.runOnClient(mc -> {
+      box.setValue("minecraft:enchanted_book_very_long_search_query");
+      box.setCursorPosition(40);
+      box.setHighlightPos(36);
+    });
+    int displayPos = c.computeOnClient(mc -> (int) privateField(box, "displayPos"));
+    String selected = c.computeOnClient(mc -> box.getHighlighted());
+    c.waitTicks(65);
+    c.runOnClient(mc -> {
+      if (targetInput(screen) != box || !box.isFocused() || screen.getFocused() != box
+          || box.getCursorPosition() != 40 || !box.getHighlighted().equals(selected)
+          || (int) privateField(box, "displayPos") != displayPos)
+        throw new AssertionError("periodic update changed input cursor, selection or scroll");
+      box.setValue(text);
+    });
+  }
+
+  private Object widgetTooltip(Button button) {
+    try {
+      var field = net.minecraft.client.gui.components.AbstractWidget.class.getDeclaredField("tooltip");
+      field.setAccessible(true);
+      return ((net.minecraft.client.gui.components.WidgetTooltipHolder) field.get(button)).get();
+    } catch (ReflectiveOperationException e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  private void testJechSearchConfiguration(ClientGameTestContext c) {
+    c.runOnClient(mc -> {
+      try {
+        var config = Class.forName("me.towdium.jecharacters.config.JechConfig");
+        var fuzzy = config.getField("enableFSh2s");
+        var keyboard = config.getField("enumKeyboard");
+        var reload = Class.forName("me.towdium.jecharacters.utils.Match").getMethod("onConfigChange");
+        Object originalKeyboard = keyboard.get(null);
+        boolean originalFuzzy = fuzzy.getBoolean(null);
+        try {
+          fuzzy.setBoolean(null, false);
+          reload.invoke(null);
+          if (ClientSearch.contains("石头", "sitou")) throw new AssertionError("JECH fuzzy-off ignored");
+          fuzzy.setBoolean(null, true);
+          reload.invoke(null);
+          if (!ClientSearch.contains("石头", "sitou")) throw new AssertionError("JECH fuzzy-on ignored");
+          Object xiaohe = Arrays.stream(keyboard.getType().getEnumConstants())
+              .filter(value -> value.toString().equals("XIAOHE")).findFirst().orElseThrow();
+          keyboard.set(null, xiaohe);
+          reload.invoke(null);
+          if (!ClientSearch.contains("测试文本", "ceuiwfbf")) throw new AssertionError("JECH double Pinyin ignored");
+        } finally {
+          keyboard.set(null, originalKeyboard);
+          fuzzy.setBoolean(null, originalFuzzy);
+          reload.invoke(null);
+        }
+      } catch (ReflectiveOperationException e) {
+        throw new AssertionError(e);
+      }
+    });
   }
 
   private void testLibrarianBooksTab(ClientGameTestContext c, TestServerContext server) {

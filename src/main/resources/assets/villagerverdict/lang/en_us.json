@@ -8,6 +8,8 @@
   "vv.shortcuts": "Shortcuts",
   "vv.data": "Manage Saved Trades",
   "vv.backToList": "← Back",
+  "vv.search.withPinyin": "%s · Pinyin enabled (Just Enough Characters)",
+  "vv.search.withoutPinyin": "%s · Install Just Enough Characters for Pinyin",
   "vv.search": "Filter villagers by profession, enchantment, item, level, or note…",
   "vv.searchHint": "Search trade/profession/note…",
   "vv.sort.label": "Sort: %s",

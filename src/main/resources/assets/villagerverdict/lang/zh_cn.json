@@ -8,6 +8,8 @@
   "vv.shortcuts": "快捷键设置",
   "vv.data": "管理已记住的交易",
   "vv.backToList": "← 返回列表",
+  "vv.search.withPinyin": "%s · 支持拼音（通用拼音搜索）",
+  "vv.search.withoutPinyin": "%s · 安装通用拼音搜索可启用拼音",
   "vv.search": "输入职业、附魔、物品、等级或备注来筛选村民…",
   "vv.searchHint": "搜索职业/附魔/物品/备注…",
   "vv.sort.label": "排序：%s",

@@ -1,7 +1,7 @@
 {
   "artifact": "/Users/eric/Documents/IdeaProjects/VillagerVerdict/build/libs/VillagerVerdict-1.0.0.jar",
-  "bytes": 250715,
-  "sha256": "6bfec038baf41a17f7fcb01ea4879b3ea5a25baff685a0e8a73235ac3d0bed6c",
+  "bytes": 260968,
+  "sha256": "bc1072d7b70c368a6ec40b7bde36be2962ac23823b45c37a5ce6c02a3ced9c5a",
   "metadata": {
     "schemaVersion": 1,
     "id": "villagerverdict",
@@ -51,7 +51,10 @@
     "cn/ericcraft/villagerverdict/client/ShortcutManager.class",
     "cn/ericcraft/villagerverdict/storage/ShortcutBindings.class",
     "cn/ericcraft/villagerverdict/client/TargetEditorScreen.class",
-    "cn/ericcraft/villagerverdict/client/VerdictScreen$DeleteTargetButton.class"
+    "cn/ericcraft/villagerverdict/client/LiveWidgets$TrashButton.class",
+    "cn/ericcraft/villagerverdict/client/ClientSearch.class",
+    "cn/ericcraft/villagerverdict/client/JechSearch.class",
+    "cn/ericcraft/villagerverdict/model/SearchText.class"
   ],
   "client_mixins": [
     "ClientPacketListenerMixin",
@@ -59,5 +62,7 @@
     "EntityRendererMixin"
   ],
   "no_test_mod_or_junit": true,
-  "no_trading_hall_region_classes": true
+  "no_trading_hall_region_classes": true,
+  "no_bundled_jech_or_pinin": true,
+  "no_required_jech_dependency": true
 }
