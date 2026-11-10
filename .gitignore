@@ -7,6 +7,9 @@
 # Gradle build folder
 build
 
+# Python release-script bytecode
+__pycache__/
+
 # IntelliJ
 out/
 .idea

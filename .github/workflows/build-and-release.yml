@@ -1,0 +1,104 @@
+name: Build and Release VillagerVerdict
+
+on:
+  push:
+    branches: [main]
+    paths: [gradle.properties]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: villagerverdict-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.version.outputs.should_release }}
+      version: ${{ steps.version.outputs.version }}
+      artifact: ${{ steps.version.outputs.artifact }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Test release scripts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Detect project version change
+        id: version
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: python3 scripts/detect-release.py
+
+  build:
+    needs: detect-version
+    if: needs.detect-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      sha256: ${{ steps.digest.outputs.sha256 }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up JDK 25
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+          cache-dependency-path: |
+            *.gradle
+            gradle.properties
+            gradle/wrapper/gradle-wrapper.properties
+      - name: Test and build with Gradle
+        run: ./gradlew --no-daemon clean build
+      - name: Verify release JAR
+        env:
+          ARTIFACT: ${{ needs.detect-version.outputs.artifact }}
+          VERSION: ${{ needs.detect-version.outputs.version }}
+        run: python3 scripts/verify-release-jar.py "build/libs/$ARTIFACT" "$VERSION"
+      - name: Record verified JAR digest
+        id: digest
+        working-directory: build/libs
+        env:
+          ARTIFACT: ${{ needs.detect-version.outputs.artifact }}
+        run: |
+          set -euo pipefail
+          shasum -a 256 "$ARTIFACT" > "$ARTIFACT.sha256"
+          digest="$(shasum -a 256 "$ARTIFACT")"
+          echo "sha256=${digest%% *}" >> "$GITHUB_OUTPUT"
+          cat "$ARTIFACT.sha256" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload release JAR
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-jar
+          path: |
+            build/libs/${{ needs.detect-version.outputs.artifact }}
+            build/libs/${{ needs.detect-version.outputs.artifact }}.sha256
+          if-no-files-found: error
+
+  release:
+    needs: [detect-version, build]
+    if: needs.detect-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download release JAR
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-jar
+          path: dist
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect-version.outputs.version }}
+          ARTIFACT: ${{ needs.detect-version.outputs.artifact }}
+          EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+        run: bash scripts/create-release.sh "$VERSION" dist "$ARTIFACT" "$EXPECTED_SHA256"

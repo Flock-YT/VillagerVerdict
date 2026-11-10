@@ -1,8 +1,10 @@
-# Villager Verdict 1.0.0
+# Villager Verdict
 
 Minecraft 26.3 的 Fabric 客户端模组，用于记录村民交易、比较商品成本、规划交易所保留名单。服务端无需安装本模组。构建和真实单人服务器集成测试结果见 [TEST_REPORT.md](TEST_REPORT.md)，能力对照见 [FEATURES.md](FEATURES.md)。未验证的验收项不视为通过。
 
 ## 安装与使用
+
+从 [GitHub Releases](https://github.com/Flock-YT/VillagerVerdict/releases) 下载对应版本的 `VillagerVerdict-<版本号>.jar`。不要安装 `sources` 源码包。
 
 需要 Java 25、Minecraft 26.3、Fabric Loader 0.19.5 和 Fabric API 0.163.0+26.3。将 `build/libs/VillagerVerdict-1.0.0.jar` 与对应 Fabric API 放入客户端 `mods` 目录。不需要额外运行库。请使用匹配的 Minecraft 版本。面向 Minecraft 26.4 的模组（例如 `gugle-carpet-addition` 的 26.4 snapshot 构建）不能与此版本同时加载；请移除它或换用 26.3 构建。
 
@@ -50,6 +52,20 @@ Minecraft 26.3 的 Fabric 客户端模组，用于记录村民交易、比较商
 图书管理员只列附魔书中的附魔，同种附魔只保留已知最高等级；最大等级为 1 的附魔省略数字。装备匠只列对应的钻石装备，其他职业的筛选范围见 [职业标记规则](FEATURES.md#职业标记规则)。物品不显示价格或数量，未采集或没有符合条件的交易时仅显示状态和等级。原有自定义名称保留在标记上方。关闭状态标记时隐藏状态行；关闭交易摘要时仅保留状态符号；两项都关闭时不添加文字，轮廓仍受标记总开关控制。
 
 ## 数据与构建
+
+### GitHub 自动发布
+
+发布流程复用同目录 ElytraPlus / WorldSafe 的版本变更检测与构建后发布逻辑，配置位于 `.github/workflows/build-and-release.yml`。
+
+1. 修改 `gradle.properties` 中的 `mod_version`（例如 `1.0.0` → `1.0.1`），提交并推送到 `main`。
+2. GitHub Actions 比较本次推送前后的版本；只有版本变化才发布，仅修改依赖版本不会发布。
+3. 使用 Java 25 执行 `./gradlew --no-daemon clean build`，通过 JUnit 和 Fabric JAR 校验后，自动创建 `v<版本号>` 标签与 Release，上传可安装 JAR 和 SHA-256 文件，自动生成更新说明。
+
+首次发布当前 `1.0.0` 时，可在 GitHub 的 Actions → Build and Release VillagerVerdict → Run workflow 中选择 `main` 手动运行，无需先改版本或手动打标签。流程使用内置 `GITHUB_TOKEN`，无需额外配置个人令牌。仓库需启用 Actions 且允许工作流写入仓库内容。已有同名标签会报错停止，不覆盖已发布版本；失败且尚未创建标签时可重跑。
+
+支持 `1.1.0-beta.1` 等预发布版本，自动标记为 Pre-release 且不设为 Latest。仅允许从 `main` 发布。此流程不自动上传 Modrinth/CurseForge，也不运行图形客户端集成测试；涉及界面、Mixin 或客户端行为的改动，发布前仍应按项目要求运行 `./gradlew runClientGameTest`。
+
+### 本地数据与构建
 
 数据位于游戏目录 `config/villagerverdict/`，配置和世界数据使用带版本 JSON；内部快捷键单独保存在 `config/villagerverdict/shortcuts.json`。世界文件名为身份哈希，身份包含服务器地址或本地存档绝对路径、数据集名称、维度；缓存再按 UUID 区分。服务器后台世界切换无法由原版协议可靠识别，需在设置中修改本地数据集名称隔离。单人存档移动路径后视为不同身份。世界数据版本为 5，仅持久保存 UUID、职业和交易快照组成的缓存，以及商品查询；不保存坐标、备注、标签、人工模式或推荐结论。再次检测到同一 UUID 且职业一致时可复用交易，并重新计算附近推荐。确认死亡或失去职业时删除缓存；普通卸载保留缓存。管理界面的“数据”页可以清空指定世界或整个服务器的交易缓存与当前活动记录，商品查询设置会保留。清空后交易信息需重新交互获取。旧开发格式不迁移，读取失败仍保护原文件。自动扫描开启时会在下一轮扫描恢复附近活动记录。旧配置的 `markerLimit`、`textRange` 字段继续读取，但不再限制标记。
 
