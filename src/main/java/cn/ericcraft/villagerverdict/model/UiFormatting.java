@@ -70,22 +70,6 @@ public final class UiFormatting {
         return formatted;
     }
 
-    public static double[] normalizedRange(double a, double b) {
-        if (!Double.isFinite(a) || !Double.isFinite(b))
-            throw new IllegalArgumentException("coordinate must be finite");
-        return a <= b ? new double[] {a, b} : new double[] {b, a};
-    }
-
-    public static int parseColorHex(String text) {
-        if (text == null) throw new IllegalArgumentException("empty color");
-        String cleaned = text.trim();
-        if (cleaned.startsWith("#")) cleaned = cleaned.substring(1);
-        if (cleaned.length() != 6 && cleaned.length() != 8)
-            throw new IllegalArgumentException("expected 6 or 8 hex digits");
-        long parsed = Long.parseLong(cleaned, 16);
-        return (int) parsed | 0xFF000000;
-    }
-
     public static String formatColorHex(int argb) {
         return String.format(Locale.ROOT, "#%06X", argb & 0x00FFFFFF);
     }

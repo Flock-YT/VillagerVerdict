@@ -8,7 +8,6 @@ import cn.ericcraft.villagerverdict.model.ComparisonResult;
 import cn.ericcraft.villagerverdict.model.DisplayStatus;
 import cn.ericcraft.villagerverdict.model.ItemData;
 import cn.ericcraft.villagerverdict.model.TargetTrade;
-import cn.ericcraft.villagerverdict.model.TradingHallRegion;
 import cn.ericcraft.villagerverdict.model.UiFormatting;
 import cn.ericcraft.villagerverdict.model.VillagerRecord;
 import java.util.ArrayList;
@@ -40,7 +39,7 @@ public final class VerdictScreen extends WorldScreen {
     private static final String[] FILTER_HELP = {
         "vv.filter.all.help", "vv.start.keep", "vv.start.discard", "vv.start.unscanned"
     };
-    private static final String[] TABS = {"vv.villagers", "vv.targets", "vv.regions"};
+    private static final String[] TABS = {"vv.villagers", "vv.targets"};
 
     /** Top of the navigation row. */
     private static final int NAV_Y = 20;
@@ -64,7 +63,7 @@ public final class VerdictScreen extends WorldScreen {
     private EditBox searchBox;
     private boolean restoreSearch;
     private int searchCursor;
-    private String query = "", regionId = "";
+    private String query = "";
     private String productQueryId = "";
     private int refresh;
     private int detailMax, lastClickY = -1, lastClickX;
@@ -94,7 +93,7 @@ public final class VerdictScreen extends WorldScreen {
     }
 
     private boolean filterActive() {
-        return !regionId.isEmpty() || !productQueryId.isEmpty();
+        return !productQueryId.isEmpty();
     }
 
     /** Bottom of the villager toolbar: one row on wide screens, two rows on narrow screens. */
@@ -123,7 +122,7 @@ public final class VerdictScreen extends WorldScreen {
 
     private int tabWidth() {
         int area = width - 24 - settingsButtonWidth() - 12;
-        return Math.max(50, Math.min(120, (area - 6) / 3));
+        return Math.max(50, Math.min(120, (area - 3 * (TABS.length - 1)) / TABS.length));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -159,8 +158,6 @@ public final class VerdictScreen extends WorldScreen {
             }
         } else if (page == 1) {
             initTargetsPage();
-        } else {
-            initRegionsPage();
         }
 
         initBottomBar();
@@ -236,7 +233,6 @@ public final class VerdictScreen extends WorldScreen {
             button(Component.translatable("vv.clearProductFilter"),
                 width - 12 - clearW, toolbarBottom(), clearW,
                 () -> {
-                    regionId = "";
                     productQueryId = "";
                     offset = 0;
                     rebuildWidgets();
@@ -250,7 +246,7 @@ public final class VerdictScreen extends WorldScreen {
         int lw = listWidth();
         for (int i = offset; i < Math.min(records.size(), offset + rows); i++) {
             var v = records.get(i);
-            var verdict = viewAnalysis().verdicts().get(v.uuid());
+            var verdict = s.analysis.verdicts().get(v.uuid());
             boolean selectedRow = v.uuid().equals(s.selected);
             String rowText = villagerRowLabel(v, verdict, selectedRow);
             var b = button(
@@ -329,26 +325,7 @@ public final class VerdictScreen extends WorldScreen {
         var addBtn = button(Component.translatable("vv.target.add"), 12, CONTENT_Y, addW, () -> openTargetEditor(null));
         addBtn.setTooltip(Tooltip.create(Component.translatable("vv.target.add.help")));
 
-        String scopeName = currentRegion() == null
-            ? Component.translatable("vv.target.scopeGlobal").getString()
-            : Component.translatable("vv.target.scopeRegion", currentRegion().name()).getString();
-        int scopeW = Math.max(80, width - 24 - addW - 6);
-        var scopeBtn = button(
-            Component.literal(font.plainSubstrByWidth(
-                Component.translatable("vv.target.scope", scopeName).getString(), scopeW - 8)),
-            12 + addW + 6, CONTENT_Y, scopeW,
-            () -> {
-                var ids = new ArrayList<String>();
-                ids.add("");
-                s.regions.forEach(r -> ids.add(r.id()));
-                regionId = ids.get((ids.indexOf(regionId) + 1) % ids.size());
-                productQueryId = "";
-                offset = 0;
-                rebuildWidgets();
-            });
-        scopeBtn.setTooltip(Tooltip.create(Component.translatable("vv.target.scope.help")));
-
-        var targets = currentTargets();
+        var targets = s.targets;
         int top = listTop();
         int rows = Math.max(1, (height - top - 32) / 24);
         offset = Math.clamp(offset, 0, Math.max(0, targets.size() - rows));
@@ -377,56 +354,6 @@ public final class VerdictScreen extends WorldScreen {
         }
     }
 
-    private void initRegionsPage() {
-        int addW = Math.min(170, font.width(Component.translatable("vv.region.add")) + 20);
-        var addBtn = button(Component.translatable("vv.region.add"), 12, CONTENT_Y, addW, () -> openRegionEditor(null));
-        addBtn.setTooltip(Tooltip.create(Component.translatable("vv.region.add.help")));
-
-        int top = listTop();
-        int rows = Math.max(1, (height - top - 32) / 24);
-        offset = Math.clamp(offset, 0, Math.max(0, s.regions.size() - rows));
-        int targetsW = Math.min(90, font.width(Component.translatable("vv.regionTargets")) + 16);
-        int editW = Math.min(70, font.width(Component.translatable("vv.regionEdit")) + 16);
-        int actionsTotal = targetsW + editW + 8;
-
-        for (int i = offset; i < Math.min(s.regions.size(), offset + rows); i++) {
-            var r = s.regions.get(i);
-            int rowY = top + (i - offset) * 24;
-            var result = s.regional.get(r.id());
-            String dimName = ClientDisplayText.dimensionDisplayName(r.dimension());
-            String label = result == null
-                ? r.name() + " · " + dimName
-                : Component.translatable("vv.regionSummary",
-                    r.name() + " (" + dimName + ")",
-                    result.recommended().size(),
-                    result.verdicts().size()).getString();
-            int mainW = Math.max(60, width - 24 - actionsTotal);
-            var row = button(
-                Component.literal(font.plainSubstrByWidth(label, mainW - 10)).withColor(r.color()),
-                12, rowY, mainW,
-                () -> {
-                    regionId = r.id();
-                    productQueryId = "";
-                    page = 0;
-                    mobileDetailView = false;
-                    offset = 0;
-                    rebuildWidgets();
-                });
-            row.setTooltip(Tooltip.create(Component.translatable("vv.region.viewHint")));
-
-            int rx = 12 + mainW + 4;
-            var targetsBtn = button(Component.translatable("vv.regionTargets"), rx, rowY, targetsW, () -> {
-                regionId = r.id();
-                productQueryId = "";
-                page = 1;
-                offset = 0;
-                rebuildWidgets();
-            });
-            targetsBtn.setTooltip(Tooltip.create(Component.translatable("vv.regionTargets.help")));
-            button(Component.translatable("vv.regionEdit"), rx + targetsW + 4, rowY, editW,
-                () -> openRegionEditor(r));
-        }
-    }
 
     private void initBottomBar() {
         int y = height - 26;
@@ -508,39 +435,16 @@ public final class VerdictScreen extends WorldScreen {
         minecraft.gui.setScreen(null);
     }
 
-    private AnalysisResult viewAnalysis() {
-        return regionId.isEmpty() ? s.analysis : s.regional.getOrDefault(regionId, AnalysisResult.empty());
-    }
-
-    private TradingHallRegion currentRegion() {
-        return s.regions.stream().filter(r -> r.id().equals(regionId)).findFirst().orElse(null);
-    }
-
-    private List<TargetTrade> currentTargets() {
-        var r = currentRegion();
-        return r == null ? s.targets : r.targets();
-    }
-
     private TargetTrade currentProductQuery() {
-        return currentTargets().stream().filter(t -> t.id().equals(productQueryId)).findFirst().orElse(null);
+        return s.targets.stream().filter(t -> t.id().equals(productQueryId)).findFirst().orElse(null);
     }
 
     private void updateTarget(String id, TargetTrade t) {
-        var list = new ArrayList<>(currentTargets());
+        var list = new ArrayList<>(s.targets);
         list.removeIf(a -> a.id().equals(id));
         if (t != null) list.add(t);
         else if (id.equals(productQueryId)) productQueryId = "";
-        var r = currentRegion();
-        if (r == null) {
-            s.targets = list;
-        } else {
-            var n = new TradingHallRegion(
-                r.id(), r.name(), r.dimension(),
-                r.minX(), r.minY(), r.minZ(), r.maxX(), r.maxY(), r.maxZ(),
-                list, r.color());
-            s.regions.removeIf(a -> a.id().equals(r.id()));
-            s.regions.add(n);
-        }
+        s.targets = list;
         s.changed();
     }
 
@@ -558,16 +462,12 @@ public final class VerdictScreen extends WorldScreen {
         }
     }
 
-    /** Villagers matching region, product query and search — before the status filter is applied. */
+    /** Villagers matching product query and search — before the status filter is applied. */
     private List<VillagerRecord> baseFiltered() {
         var productQuery = currentProductQuery();
         String q = query.toLowerCase(Locale.ROOT);
         return s.records().stream()
             .filter(s::enabled)
-            .filter(v -> regionId.isEmpty()
-                || s.regions.stream()
-                    .filter(r -> r.id().equals(regionId))
-                    .anyMatch(r -> r.contains(v)))
             .filter(v -> productQuery == null || productQuery.matches(v))
             .filter(v -> q.isEmpty() || search(v).contains(q))
             .toList();
@@ -578,7 +478,7 @@ public final class VerdictScreen extends WorldScreen {
         long[] counts = new long[4];
         for (var v : baseFiltered()) {
             counts[0]++;
-            counts[1 + s.displayStatus(v, viewAnalysis().verdicts().get(v.uuid())).ordinal()]++;
+            counts[1 + s.displayStatus(v, s.analysis.verdicts().get(v.uuid())).ordinal()]++;
         }
         return counts;
     }
@@ -586,7 +486,7 @@ public final class VerdictScreen extends WorldScreen {
     private List<VillagerRecord> filtered() {
         var list = baseFiltered().stream()
             .filter(v -> filter == 0
-                || s.displayStatus(v, viewAnalysis().verdicts().get(v.uuid())).ordinal() == filter - 1)
+                || s.displayStatus(v, s.analysis.verdicts().get(v.uuid())).ordinal() == filter - 1)
             .toList();
 
         Comparator<VillagerRecord> order = switch (sort) {
@@ -596,10 +496,10 @@ public final class VerdictScreen extends WorldScreen {
             case 3 -> Comparator.comparingDouble(s::distanceSquared);
             case 4 -> Comparator.comparing(VillagerRecord::profession);
             default -> Comparator.<VillagerRecord>comparingInt(v -> v.fixed() ? 0 : 1)
-                .thenComparingInt(v -> viewAnalysis().recommended().contains(v.uuid()) ? 0 : 1)
+                .thenComparingInt(v -> s.analysis.recommended().contains(v.uuid()) ? 0 : 1)
                 .thenComparing(Comparator.<VillagerRecord>comparingInt(
-                    v -> viewAnalysis().verdicts().containsKey(v.uuid())
-                        ? viewAnalysis().verdicts().get(v.uuid()).uniqueTrades()
+                    v -> s.analysis.verdicts().containsKey(v.uuid())
+                        ? s.analysis.verdicts().get(v.uuid()).uniqueTrades()
                         : 0).reversed())
                 .thenComparing(Comparator.<VillagerRecord>comparingInt(
                     v -> v.snapshot() == null ? 0 : ProfessionHighlights.trades(v).size()).reversed());
@@ -682,7 +582,6 @@ public final class VerdictScreen extends WorldScreen {
         if (s.navigationActive()) return guide(COLOR_GUIDE, "vv.guide.navigating");
         if (!s.ready() || s.identity() == null) return guide(COLOR_MUTED, "vv.guide.loading");
         if (page == 1) return guide(COLOR_GUIDE, "vv.guide.targets");
-        if (page == 2) return guide(COLOR_GUIDE, "vv.guide.regions");
 
         var st = s.stats();
         long success = st.getOrDefault("success", 0L);
@@ -701,7 +600,7 @@ public final class VerdictScreen extends WorldScreen {
         long keep = 0, discard = 0;
         for (var v : s.records()) {
             if (!s.enabled(v)) continue;
-            var status = s.displayStatus(v, viewAnalysis().verdicts().get(v.uuid()));
+            var status = s.displayStatus(v, s.analysis.verdicts().get(v.uuid()));
             if (status == DisplayStatus.KEEP) keep++;
             else if (status == DisplayStatus.DISCARD) discard++;
         }
@@ -744,8 +643,7 @@ public final class VerdictScreen extends WorldScreen {
                 var productQuery = currentProductQuery();
                 String caption = productQuery != null
                     ? Component.translatable("vv.filterBanner.product", ClientDisplayText.targetSummary(productQuery)).getString()
-                    : currentRegion() == null ? ""
-                    : Component.translatable("vv.filterBanner.region", currentRegion().name()).getString();
+                    : "";
                 int clearW = Math.min(110, font.width(Component.translatable("vv.clearProductFilter")) + 16);
                 g.text(font, font.plainSubstrByWidth(caption, width - 36 - clearW), 12, toolbarBottom() + 6, COLOR_MUTED);
             }
@@ -779,7 +677,7 @@ public final class VerdictScreen extends WorldScreen {
                 if (st.getOrDefault("active", 0L) > 0L) {
                     statsText += Component.translatable("vv.statsReading").getString();
                 }
-                var gaps = viewAnalysis().gaps();
+                var gaps = s.analysis.gaps();
                 if (!gaps.isEmpty()) {
                     statsText += Component.translatable("vv.gapSummary", gaps.size()).getString();
                 }
@@ -799,7 +697,7 @@ public final class VerdictScreen extends WorldScreen {
                 }
             }
         } else if (page == 1) {
-            var targets = currentTargets();
+            var targets = s.targets;
             int top = listTop();
             if (targets.isEmpty()) {
                 drawMessagePanel(g, 12, top, width - 24, "vv.emptyTargets");
@@ -811,10 +709,6 @@ public final class VerdictScreen extends WorldScreen {
                         targetIcons.add(new TargetIcon(stack, 14, top + 2 + (i - offset) * 24));
                     }
                 }
-            }
-        } else if (page == 2) {
-            if (s.regions.isEmpty()) {
-                drawMessagePanel(g, 12, listTop(), width - 24, "vv.emptyRegions");
             }
         }
 
@@ -877,7 +771,7 @@ public final class VerdictScreen extends WorldScreen {
         yy += 2;
         yy = drawWrappedLine(g, Component.translatable("vv.start.click").getString(), x + 8, yy, innerW, COLOR_MUTED);
 
-        var gaps = viewAnalysis().gaps();
+        var gaps = s.analysis.gaps();
         if (!gaps.isEmpty()) {
             yy += 4;
             yy = drawWrappedLine(g, Component.translatable("vv.start.gaps").getString(), x + 8, yy, innerW, COLOR_WARN);
@@ -910,7 +804,7 @@ public final class VerdictScreen extends WorldScreen {
 
         // 2. Verdict and plain-language reason.
         yy += 2;
-        var verdict = viewAnalysis().verdicts().get(v.uuid());
+        var verdict = s.analysis.verdicts().get(v.uuid());
         var displayStatus = s.displayStatus(v, verdict);
         int statusColor = color(v, verdict);
         var snap = v.snapshot();
@@ -931,44 +825,25 @@ public final class VerdictScreen extends WorldScreen {
                 x + 8, yy, innerW, COLOR_FAINT);
         }
 
-        // 4. Trades with icons and plain pricing.
+        // 4. Signature goods with base emerald prices only.
         if (snap != null) {
             yy += 4;
             yy = drawWrappedLine(g, Component.translatable("vv.detail.trades",
                 ClientDisplayText.relativeTimeText(snap.checkedAt())).getString(), x + 8, yy, innerW, COLOR_MUTED);
             yy += 1;
-            for (var t : snap.trades()) {
-                if (yy >= y && yy + 18 < y + h) {
-                    icons.add(new Icon(t.actualInput(), x + 8, yy));
-                    if (t.secondInput() != null) icons.add(new Icon(t.secondInput(), x + 28, yy));
-                    icons.add(new Icon(t.output(), x + (t.secondInput() == null ? 44 : 64), yy));
+            var trades = ProfessionHighlights.trades(v);
+            if (trades.isEmpty()) {
+                yy = drawWrappedLine(g, Component.translatable("vv.detail.noSignatureTrades").getString(),
+                    x + 8, yy, innerW, COLOR_MUTED);
+            }
+            for (var t : trades) {
+                if (yy >= y && yy + 16 < y + h) {
+                    icons.add(new Icon(t.output(), x + 8, yy));
                 }
-                g.text(font, "→", x + (t.secondInput() == null ? 29 : 49), yy + 4, COLOR_MUTED);
-                yy += 20;
-
-                String costNow = t.actualInput().count() + " " + ItemCodecAdapter.displayName(t.actualInput());
-                if (t.secondInput() != null) {
-                    costNow += " + " + t.secondInput().count() + " " + ItemCodecAdapter.displayName(t.secondInput());
-                }
-                String outName = ItemCodecAdapter.displayName(t.output());
-                String ench = ItemCodecAdapter.enchantmentText(t.output());
-                if (!ench.isEmpty()) outName += " (" + ench + ")";
-
-                String tradeLine = t.actualInput().count() < t.baseInput().count()
-                    ? Component.translatable("vv.tradeLineDiscount",
-                        costNow,
-                        t.baseInput().count(),
-                        outName,
-                        t.output().count(),
-                        t.maxUses() - t.uses(),
-                        t.maxUses()).getString()
-                    : Component.translatable("vv.tradeLineNormal",
-                        costNow,
-                        outName,
-                        t.output().count(),
-                        t.maxUses() - t.uses(),
-                        t.maxUses()).getString();
-                yy = drawWrappedLine(g, tradeLine, x + 8, yy, innerW, 0xFFFFFFFF);
+                int rowTop = yy;
+                yy = drawWrappedLine(g, ClientDisplayText.signatureTradeSummary(t),
+                    x + 28, yy, Math.max(24, innerW - 20), 0xFFFFFFFF);
+                yy = Math.max(yy, rowTop + 18) + 4;
             }
         }
 
@@ -1073,25 +948,6 @@ public final class VerdictScreen extends WorldScreen {
             t == null ? null : () -> updateTarget(t.id(), null)));
     }
 
-    private void openRegionEditor(TradingHallRegion r) {
-        String dim = s.identity() == null ? "minecraft:overworld" : s.identity().dimension();
-        minecraft.gui.setScreen(new RegionEditorScreen(
-            this,
-            r,
-            dim,
-            saved -> {
-                s.regions.removeIf(a -> a.id().equals(saved.id()));
-                s.regions.add(saved);
-                s.changed();
-            },
-            r == null
-                ? null
-                : () -> {
-                    s.regions.removeIf(a -> a.id().equals(r.id()));
-                    if (r.id().equals(regionId)) regionId = "";
-                    s.changed();
-                }));
-    }
 
     @Override
     public boolean keyPressed(KeyEvent e) {

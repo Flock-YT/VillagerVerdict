@@ -4,7 +4,7 @@ Validated on 2026-11-09 with Java 25 and Minecraft 26.3. All game integration te
 
 ## Diagnosis
 
-The running client connected to a multiplayer server, so the relevant evidence was the mod's persisted world JSON rather than a local singleplayer save. Its configuration enabled automatic scanning, used a 30-minute cache and had no custom trade targets or regions.
+The running client connected to a multiplayer server, so the relevant evidence was the mod's persisted world JSON rather than a local singleplayer save. Its configuration enabled automatic scanning, used a 30-minute cache and had no custom trade targets.
 
 The installed optimizer used commodity-only coverage to select traders, then price-sensitive replacement checks to classify the remaining traders. This could select a librarian selling Thorns III for 32 emeralds while leaving a 12-emerald trader outside the retained set. The latter then received REVIEW, translated as “待检查”, even though its offers were successfully captured. Unlocked future levels reduced confidence but did not directly cause REVIEW.
 
@@ -12,7 +12,7 @@ A read-only offline replay compared the installed JAR and the modified main clas
 
 ## Behavior
 
-- Settings offer profession switches, select all and select none. Choices remain a draft until the parent settings form is saved. Disabled professions retain their records but are excluded from scanning, markers, navigation, current lists, statistics and global/regional analysis.
+- Settings offer profession switches, select all and select none. Choices remain a draft until the parent settings form is saved. Disabled professions retain their records but are excluded from scanning, markers, navigation, current lists, statistics and retention analysis.
 - Disabling an active profession cancels its probe and invalidates old asynchronous analysis. A loaded entity's current profession is checked against its cached record before that record can participate.
 - Commodity backup requirements are supplemented with one price guarantee for every nondominated relevant trade vector. Both selection and replacement evidence use the same replacement rule. More expensive backups remain valid; target scopes and manual overrides remain in effect.
 - Presentation distinguishes unscanned, expired, analyzing and scanned-but-needing-review states. Future unlocks remain a completeness/confidence warning. Markers, list symbols/colors and details share the display-state resolver.

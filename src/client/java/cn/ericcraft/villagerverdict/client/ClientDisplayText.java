@@ -3,6 +3,7 @@ package cn.ericcraft.villagerverdict.client;
 import cn.ericcraft.villagerverdict.model.DisplayStatus;
 import cn.ericcraft.villagerverdict.model.ItemData;
 import cn.ericcraft.villagerverdict.model.TargetTrade;
+import cn.ericcraft.villagerverdict.model.Trade;
 import cn.ericcraft.villagerverdict.model.UiFormatting;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -113,6 +114,16 @@ public final class ClientDisplayText {
         String enchantments = ItemCodecAdapter.enchantmentText(item);
         return item.item().equals("minecraft:enchanted_book") ? enchantments
             : ItemCodecAdapter.displayName(item) + " (" + enchantments + ")";
+    }
+
+    /** Base price per offer, independent of discounts, demand and remaining stock. */
+    public static String signatureTradeSummary(Trade trade) {
+        String product = productSummary(trade.output());
+        if (trade.output().count() > 1) product += " ×" + trade.output().count();
+        int emeralds = trade.baseInput().item().equals("minecraft:emerald") ? trade.baseInput().count() : 0;
+        if (trade.secondInput() != null && trade.secondInput().item().equals("minecraft:emerald"))
+            emeralds += trade.secondInput().count();
+        return Component.translatable("vv.trade.signature", product, emeralds).getString();
     }
 
     public static String targetSummary(TargetTrade t) {

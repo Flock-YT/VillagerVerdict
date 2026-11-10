@@ -56,9 +56,7 @@ public final class VerdictService {
   private final Map<UUID, CachedTrade> tradeCache = new LinkedHashMap<>();
   private final Map<UUID, String> notifications = new HashMap<>();
   public List<TargetTrade> targets = new ArrayList<>();
-  public List<TradingHallRegion> regions = new ArrayList<>();
   public AnalysisResult analysis = AnalysisResult.empty();
-  public Map<String, AnalysisResult> regional = Map.of();
 
   public record Marker(
       int color, List<Component> lines) {
@@ -198,9 +196,6 @@ public final class VerdictService {
     markers = Map.copyOf(remainingMarkers);
     // Keep published colors for remaining villagers until a fresh result is ready.
     analysis = without(analysis, removed);
-    var remainingRegions = new LinkedHashMap<String, AnalysisResult>();
-    regional.forEach((id, result) -> remainingRegions.put(id, without(result, removed)));
-    regional = Map.copyOf(remainingRegions);
     analysisRevision++;
     dirty = true;
   }
@@ -321,9 +316,7 @@ public final class VerdictService {
     tradeCache.clear();
     persistedData = null;
     targets = new ArrayList<>();
-    regions = new ArrayList<>();
     analysis = AnalysisResult.empty();
-    regional = Map.of();
     markers = Map.of();
     nearby = Set.of();
     notifications.clear();
@@ -360,7 +353,6 @@ public final class VerdictService {
                       persistedData = data;
                       data.cachedTrades().forEach(v -> tradeCache.put(v.uuid(), v));
                       targets = new ArrayList<>(data.targets());
-                      regions = new ArrayList<>(data.regions());
                       ready = true;
                       error = "";
                       scan();
@@ -442,7 +434,7 @@ public final class VerdictService {
   }
 
   private WorldData currentWorldData() {
-    return new WorldData(4, identity, List.copyOf(tradeCache.values()), List.copyOf(targets), List.copyOf(regions));
+    return new WorldData(5, identity, List.copyOf(tradeCache.values()), List.copyOf(targets));
   }
 
   private void resetActiveAfterClear() {
@@ -453,7 +445,6 @@ public final class VerdictService {
     tradeCache.clear();
     notifications.clear();
     analysis = AnalysisResult.empty();
-    regional = Map.of();
     markers = Map.of();
     nearby = Set.of();
     selected = null;
@@ -542,11 +533,10 @@ public final class VerdictService {
     // Empty records are safe whether this queued snapshot is written before or after the clear.
     var current =
         new WorldData(
-            4,
+            5,
             identity,
             clearingCurrentWorld() ? List.of() : List.copyOf(tradeCache.values()),
-            List.copyOf(targets),
-            List.copyOf(regions));
+            List.copyOf(targets));
     if (current.equals(persistedData)) return;
     if (store.save(dataPath(identity), current)) persistedData = current;
   }
@@ -583,23 +573,13 @@ public final class VerdictService {
     long request = ++analysisRevision;
     long epoch = generation;
     var input = records.values().stream().filter(this::enabled).toList();
-    var regionCopy = List.copyOf(regions);
     var options = settings;
     java.util.concurrent.CompletableFuture.supplyAsync(
             () -> {
               long start = System.nanoTime();
               var optimizer = new Optimizer();
-              var global =
-                  optimizer.analyze(
-                        input, options.backups());
-              var perRegion = new LinkedHashMap<String, AnalysisResult>();
-              for (var r : regionCopy)
-                perRegion.put(
-                    r.id(),
-                    optimizer.analyze(
-                        input.stream().filter(r::contains).toList(),
-                        options.backups()));
-              return new Computed(global, Map.copyOf(perRegion), System.nanoTime() - start);
+              var result = optimizer.analyze(input, options.backups());
+              return new Computed(result, System.nanoTime() - start);
             },
             analyzer)
         .whenComplete(
@@ -613,15 +593,13 @@ public final class VerdictService {
                         error = "Analysis failed";
                         return;
                       }
-                      analysis = result.global();
-                      regional = result.regional();
+                      analysis = result.analysis();
                       analysisNanos = result.nanos();
                       refreshReplacementNavigation();
                     }));
   }
 
-  private record Computed(
-      AnalysisResult global, Map<String, AnalysisResult> regional, long nanos) {}
+  private record Computed(AnalysisResult analysis, long nanos) {}
 
   public void humanAction() {
     if (!autoDispatch && probe.context() != null) cancel(State.CONFLICT);
@@ -977,13 +955,7 @@ public final class VerdictService {
     if (!settings.notifications()
         || f.equals(previous)
         || old.snapshot() != null && f.equals(old.snapshot().fingerprint())) return;
-    boolean target =
-        targets.stream()
-                .anyMatch(t -> t.matches(old.withSnapshot(snap)))
-            || regions.stream()
-                .filter(r -> r.contains(old))
-                .flatMap(r -> r.targets().stream())
-                .anyMatch(t -> t.matches(old.withSnapshot(snap)));
+    boolean target = targets.stream().anyMatch(t -> t.matches(old.withSnapshot(snap)));
     if (target || old.snapshot() != null) {
       SystemToast.add(
           mc.gui.toastManager(),

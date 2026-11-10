@@ -3,7 +3,7 @@
   "id": "villagerverdict",
   "version": "${version}",
   "name": "VillagerVerdict",
-  "description": "Client-side villager trade capture, comparison and trading hall management.",
+  "description": "Client-side villager trade capture, signature goods and retention recommendations.",
   "authors": [
     "Eric"
   ],

@@ -210,19 +210,6 @@ class AnalysisTest {
   }
 
   @Test
-  void regionIsThreeDimensionalAndInclusive() {
-    var r = new TradingHallRegion("r", "hall", WORLD.dimension(), 0, 0, 0, 2, 64, 2, List.of(), 0);
-    assertTrue(r.contains(v(1)));
-    assertFalse(r.contains(v(3)));
-  }
-
-
-
-
-
-
-
-  @Test
   void manuallyKeptRecordOverridesRecommendations() {
     var a = v(1, trade(1, book(5))).withManual(VillagerRecord.Manual.KEEP, "", Set.of());
     var r = analyze(List.of(a), 1);

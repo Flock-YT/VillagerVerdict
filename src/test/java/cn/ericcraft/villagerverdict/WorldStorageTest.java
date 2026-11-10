@@ -18,9 +18,7 @@ class WorldStorageTest {
         var record = new VillagerRecord(identity, original.uuid(), original.profession(), original.level(),
             false, 0, 0, 0, 1, original.snapshot(), VillagerRecord.Manual.KEEP, "note", Set.of("tag"));
         var target = new TargetTrade("t", "minecraft:book", "", 1, 0);
-        var region = new TradingHallRegion("r", "Hall", dimension, 0, 0, 0, 5, 5, 5,
-            List.of(target), 0xFF99AAFF);
-        return new WorldData(4, identity, List.of(CachedTrade.from(record)), List.of(target), List.of(region));
+        return new WorldData(5, identity, List.of(CachedTrade.from(record)), List.of(target));
     }
 
     private Path path(WorldData data) {

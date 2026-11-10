@@ -1,13 +1,13 @@
 {
   "artifact": "/Users/eric/Documents/IdeaProjects/VillagerVerdict/build/libs/VillagerVerdict-1.0.0.jar",
-  "bytes": 154476,
-  "sha256": "3fd5ad38b8118f6f92c98590d7a45db6b1160f780a59b4e4b8f1e53b4314d157",
+  "bytes": 234954,
+  "sha256": "02e822d5693c4ee82be05803148e381d8155e96b0b9d1c4b43cc059113301424",
   "metadata": {
     "schemaVersion": 1,
     "id": "villagerverdict",
     "version": "1.0.0",
     "name": "VillagerVerdict",
-    "description": "Client-side villager trade capture, comparison and trading hall management.",
+    "description": "Client-side villager trade capture, signature goods and retention recommendations.",
     "authors": [
       "Eric"
     ],
@@ -56,5 +56,6 @@
     "GuiMixin",
     "EntityRendererMixin"
   ],
-  "no_test_mod_or_junit": true
+  "no_test_mod_or_junit": true,
+  "no_trading_hall_region_classes": true
 }

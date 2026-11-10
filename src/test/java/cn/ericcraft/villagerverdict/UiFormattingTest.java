@@ -41,21 +41,14 @@ class UiFormattingTest {
     }
 
     @Test
-    void decimalFormattingAndRangesAndColorsWorkAsExpected() {
+    void decimalFormattingAndColorsWorkAsExpected() {
         assertEquals("0", UiFormatting.formatDecimal(0.0));
         assertEquals("16", UiFormatting.formatDecimal(16.001));
         assertEquals("1.5", UiFormatting.formatDecimal(1.5));
         assertEquals("0.25", UiFormatting.formatDecimal(0.25));
 
-        assertArrayEquals(new double[] {-32, 64}, UiFormatting.normalizedRange(64, -32));
-        assertArrayEquals(new double[] {10, 20}, UiFormatting.normalizedRange(10, 20));
-        assertThrows(IllegalArgumentException.class, () -> UiFormatting.normalizedRange(Double.POSITIVE_INFINITY, 0));
-
-        assertEquals(0xFF55DD88, UiFormatting.parseColorHex("#55DD88"));
-        assertEquals(0xFF55DD88, UiFormatting.parseColorHex("0055dd88"));
         assertEquals("#55DD88", UiFormatting.formatColorHex(0xFF55DD88));
         assertEquals("#55DD88", UiFormatting.formatColorHex(0x0055DD88));
-        assertThrows(IllegalArgumentException.class, () -> UiFormatting.parseColorHex("#123"));
         assertEquals(9, UiFormatting.COLOR_PRESETS.size());
     }
 

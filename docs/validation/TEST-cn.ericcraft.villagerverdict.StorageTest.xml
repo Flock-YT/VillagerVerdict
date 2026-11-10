@@ -1,20 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="cn.ericcraft.villagerverdict.StorageTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-09T07:19:06.448Z" hostname="Mac-Mini.local" time="0.062">
+<testsuite name="cn.ericcraft.villagerverdict.StorageTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-10T11:37:38.614Z" hostname="Mac-Mini.local" time="0.033">
   <properties/>
-  <testcase name="rejectsOldWorldEnvelope()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.001"/>
-  <testcase name="identitiesIsolateServerDimensionAndDataset()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.002"/>
-  <testcase name="futureVersionProtected()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.003"/>
-  <testcase name="atomicWritesLeaveNoTemporaryFiles()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.007"/>
-  <testcase name="malformedFileNeverOverwritten()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.002"/>
-  <testcase name="currentSettingsRoundTripWithoutFreshnessFields()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.005"/>
-  <testcase name="nullFileProtected()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.001"/>
+  <testcase name="identitiesIsolateServerDimensionAndDataset()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.001"/>
+  <testcase name="currentSettingsRoundTripWithoutFreshnessFields()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.006"/>
   <testcase name="missingFileUsesDefault()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.001"/>
-  <testcase name="oldSettingsAreRejectedWithoutMigration()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.007"/>
-  <testcase name="clearingVillagersPreservesWorldConfiguration()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.0"/>
-  <testcase name="writesForTwoWorldsDoNotMix()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.009"/>
-  <testcase name="repairedOrMissingFileUnblocksWrites()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.011"/>
-  <testcase name="restartRestoresLatestSnapshot()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.01"/>
-  <testcase name="rejectDuplicateUUIDAndWrongWorld()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.001"/>
+  <testcase name="clearingVillagersPreservesWorldConfiguration()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.001"/>
+  <testcase name="writesForTwoWorldsDoNotMix()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.014"/>
+  <testcase name="unsupportedWorldVersionStaysProtectedWithoutMigration()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.003"/>
+  <testcase name="restartRestoresLatestSnapshot()" classname="cn.ericcraft.villagerverdict.StorageTest" time="0.007"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

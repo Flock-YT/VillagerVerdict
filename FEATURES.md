@@ -1,6 +1,6 @@
-# 70 项实施对照
+# 功能实施对照
 
-本表保留原有 67 项能力索引，并追加快捷键管理、数据清理和快捷键反馈功能。所有行均有业务代码，验证程度单独列明；“代码”或“未验证”不等于实测通过。
+本表沿用能力编号，列出当前功能及验证边界。所有行均有业务代码，验证程度单独列明；“代码”或“未验证”不等于实测通过。
 
 | 编号 | 能力 | 实现位置（类/方法） | 验证边界 |
 |---|---|---|---|
@@ -26,9 +26,9 @@
 | 20 | 记录变更更新分析和索引 | `VerdictService.changed / analyze` | 集成；后台代次校验 |
 | 21 | 高级附魔优先于价格 | `ItemData.dominates / TradeComparison` | 单元 |
 | 22 | 装备其他组件及逐项附魔保守比较 | `ItemData.sameValue / dominates` | 单元；附魔集合不同时不替代 |
-| 23 | 不同附魔等级独立存储展示 | `TradeSnapshot / VerdictScreen` | 单元；真实多等级 GUI 未专项实测 |
+| 23 | 不同附魔等级独立存储展示 | `TradeSnapshot / VerdictScreen` | 单元与中英文宽窄详情渲染断言 |
 | 24 | 所有已知职业标志性商品覆盖 | `ProfessionHighlights / Optimizer` | 独有附魔、四本及更多附魔书单元与真实交易包集成 |
-| 25 | 商品查询的附魔和基础单价条件 | `TargetTrade.matches / VerdictScreen` | 单元及真实查询 UI、价格与区域筛选；不影响保留判定 |
+| 25 | 商品查询的附魔和基础单价条件 | `TargetTrade.matches / VerdictScreen` | 单元及真实查询 UI、价格筛选；不影响保留判定 |
 | 26 | 确定性贪心多重覆盖 | `Optimizer` | 单元及 500/4000 基准 |
 | 27 | 冗余移除和不可满足约束 | `Optimizer` | 单元 |
 | 28 | 人工保留固定纳入 | `VillagerRecord.fixed / Optimizer` | 单元 |
@@ -47,15 +47,13 @@
 | 41 | 滚动列表、选中详情及透明管理界面 | `VerdictScreen / WorldScreen / WorldConfirmScreen` | 中英文昼夜宽窄截图；所有管理页及确认框无整屏背景/模糊、不暂停，未加载世界时恢复原版背景 |
 | 42 | 职业/物品/附魔/等级/价格搜索 | `VerdictScreen.search` | 代码；所有搜索组合未验证 |
 | 43 | 价格/等级/距离/职业/综合排序 | `VerdictScreen.filtered` | 单元价格；所有 GUI 排序未逐项操作 |
-| 44 | 全交易、图标、提示、备注和标签 | `VerdictScreen / FormScreen` | 详情/图标截图；备注标签 CRUD 未完整实测 |
-| 45 | 保存商品查询的新建、编辑、删除及结果跳转 | `VerdictScreen / TargetEditorScreen` | 真实 UI CRUD、清除筛选、价格与区域结果验证 |
+| 44 | 典型交易、基础原价、图标、提示、备注和标签 | `VerdictScreen / ClientDisplayText` | 中英文宽窄详情渲染与图标截图；备注标签 CRUD 未完整实测 |
+| 45 | 保存商品查询的新建、编辑、删除及结果跳转 | `VerdictScreen / TargetEditorScreen` | 真实 UI CRUD、清除筛选、价格结果验证 |
 | 46 | 颜色、频率、提醒及完整重置 | `SettingsScreen` | 窄窗口边界断言、颜色截图、隐藏字段和跨服务器自启记录重置 |
 | 47 | 单写入队列与合并 | `JsonStore` | 100 次写入单元及真实场景 |
 | 48 | 损坏/未来版本写保护 | `JsonStore.read` | 单元 |
 | 49 | 最新快照、重启和迁移 | `WorldData / JsonStore / Settings` | 单元 |
 | 50 | 临时文件原子替换及世界异步切换 | `JsonStore.atomic / VerdictService` | 单元与双存档集成 |
-| 51 | 同维度长方体区域创建/编辑 | `TradingHallRegion / VerdictScreen.region` | 单元与创建集成 |
-| 52 | 区域独立分析和商品查询 | `VerdictService.regional / updateTarget` | 区域查询筛选集成；查询不参与保留分析 |
 | 53 | 只统计当前已发现加载对象 | `VerdictService.stats` | 集成；无业对象单独统计 |
 | 54 | 扫描范围内未读取村民导航 | `navigateNext / HUD / ShortcutActions` | 真实导航快捷键、范围退出清理及无目标提示验证 |
 | 55 | 自动探测默认关闭/按服务器保存 | `Settings.autoServers / ProbeController` | 单元与集成 |
@@ -75,6 +73,8 @@
 | 68 | 按世界或服务器清空村民记录并保留配置 | `DataScreen / VerdictService / WorldData` | 单元隔离和配置保留；真实 GUI 确认/取消、清理和重扫 |
 | 69 | 管理页快捷键改绑、清除和恢复默认 | `ShortcutScreen` | 旧 options 不恢复 F9/F10；独立文件及新控制器恢复；原版与模组管理键同步 |
 | 70 | 游戏内快捷键即时状态提示 | `ShortcutActions / Hud.setOverlayMessage` | 真实按键验证标记双向切换、扫描人数、定位/无目标、探测授权和暂停；清理中扫描提示不可用；自动操作和改绑不刷提示 |
+
+详情复用以下职业商品清单，但逐条保留全部等级和价格，不合并为最高等级。每行显示商品、附魔和基础绿宝石原价，隐藏普通交易、输入材料、折扣和库存。
 
 ## 职业标记规则
 
@@ -96,7 +96,7 @@
 | 牧羊人 | 旗帜、画 |
 | 屠夫 | 熟鸡肉、熟猪排 |
 
-## 20 项职责边界
+## 职责边界
 
 | 职责 | 实现 |
 |---|---|
@@ -116,7 +116,6 @@
 | 14 保留集合规划 | Optimizer |
 | 15 原因和替代说明 | ComparisonResult / AnalysisResult |
 | 16 目标与价格条件 | TargetTrade / updateTarget |
-| 17 区域及独立分析 | TradingHallRegion / regional |
 | 18 管理 GUI、搜索、滚动和表单 | VerdictScreen / FormScreen |
 | 19 世界标记和导航 | prepareMarkers / EntityRendererMixin / HUD |
 | 20 变化提醒与指纹去重 | SnapshotDelta / TradeSnapshot.fingerprint / notifyChanges |

@@ -46,6 +46,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       testNavigation(c, server);
       testReplacementSearch(c, server);
       testSignatureProducts(c, server);
+      testSignatureDetails(c, server);
       testContinuousThreeStates(c, server, connection);
       UUID id =
           server.computeOnServer(
@@ -189,14 +190,6 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       c.clickScreenButton("vv.targetEditor.backToForm");
       c.clickScreenButton("vv.save");
       c.takeScreenshot("targets-populated-zh");
-      c.clickScreenButton("vv.regions");
-      c.clickScreenButton("vv.region.add");
-      c.waitForScreen(RegionEditorScreen.class);
-      c.runOnClient(this::assertTransparent);
-      c.takeScreenshot("region-editor");
-      c.clickScreenButton("vv.regionEditor.radius16");
-      c.clickScreenButton("vv.save");
-      c.takeScreenshot("regions-populated-zh");
       c.clickScreenButton("vv.villagers");
       c.runOnClient(mc -> VerdictService.INSTANCE.selected = id);
       clickButtonContaining(c, "Lv.");
@@ -675,8 +668,8 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var service = VerdictService.INSTANCE;
       service.selected = service.records().iterator().next().uuid();
       service.startNavigation(service.selected);
-      return new WorldData(4, service.identity(), service.records().stream().filter(v -> v.snapshot() != null).map(CachedTrade::from).toList(),
-          List.copyOf(service.targets), List.copyOf(service.regions));
+      return new WorldData(5, service.identity(), service.records().stream().filter(v -> v.snapshot() != null).map(CachedTrade::from).toList(),
+          List.copyOf(service.targets));
     });
     var sibling = withIdentity(original,
         new WorldIdentity(original.identity().server(), "other-dataset", "minecraft:the_nether"));
@@ -710,10 +703,10 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.runOnClient(mc -> {
       var service = VerdictService.INSTANCE;
       if (!service.records().isEmpty() || !service.analysis.verdicts().isEmpty()
-          || !service.regional.isEmpty() || !service.markers.isEmpty()
+          || !service.markers.isEmpty()
           || !service.nearby.isEmpty() || service.selected != null || service.navigationActive() || service.probe.running())
         throw new AssertionError("clear left stale memory or asynchronous analysis");
-      if (!service.targets.equals(original.targets()) || !service.regions.equals(original.regions()))
+      if (!service.targets.equals(original.targets()))
         throw new AssertionError("clear removed configuration");
     });
     try (var store = new JsonStore(e -> { throw new AssertionError(e); })) {
@@ -831,13 +824,9 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       var id = UUID.randomUUID();
       cache.put(id, new CachedTrade(id, "minecraft:librarian", new TradeSnapshot(List.of(), 1)));
       var target = new TargetTrade("clear-" + transition, "minecraft:book", "", 1, 0);
-      var region = new TradingHallRegion("clear-" + transition, transition, service.identity().dimension(),
-          0, 0, 0, 10, 10, 10, List.of(target), 0xFF55DD88);
       var targets = new ArrayList<>(service.targets);
-      var regions = new ArrayList<>(service.regions);
       targets.add(target);
-      regions.add(region);
-      return new WorldData(4, service.identity(), List.of(), targets, regions);
+      return new WorldData(5, service.identity(), List.of(), targets);
     });
     CompletableFuture<Integer> clearing;
     try (var barrier = holdWorldStore(c)) {
@@ -846,7 +835,6 @@ public class ClientIntegrationTest implements FabricClientGameTest {
         var future = transition.equals("dataset") ? service.clearWorldVillagers(service.identity())
             : service.clearServerVillagers(service.identity().server());
         service.targets = new ArrayList<>(expected.targets());
-        service.regions = new ArrayList<>(expected.regions());
         service.changed();
         return future;
       });
@@ -873,7 +861,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.runOnClient(mc -> {
       var service = VerdictService.INSTANCE;
       if (!expected.identity().equals(service.identity()) || !expected.targets().equals(service.targets)
-          || !expected.regions().equals(service.regions) || !service.records().isEmpty())
+          || !service.records().isEmpty())
         throw new AssertionError("cleared world did not reload its edited configuration");
     });
   }
@@ -1204,14 +1192,11 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.runOnClient(mc -> {
       var service = VerdictService.INSTANCE;
       service.targets = List.of(saved);
-      service.regions = new ArrayList<>(List.of(new TradingHallRegion("signature-query", "Single librarian",
-          service.identity().dimension(), 1.9, -61, -.1, 2.1, -58, .1, List.of(saved), 0x55DD88)));
       service.changed();
     });
     c.clickScreenButton("vv.targets");
-    clickButtonPrefix(c, net.minecraft.network.chat.Component.translatable("vv.target.scope", "").getString().trim());
     c.clickScreenButton("vv.target.viewVillagers");
-    assertProductResults(c, Set.of(ids.get(1)));
+    assertProductResults(c, Set.of(ids.get(0), ids.get(1), ids.get(2)));
     c.clickScreenButton("vv.clearProductFilter");
     c.clickScreenButton("vv.targets");
     clickButtonPrefix(c, ClientDisplayText.targetSummary(saved));
@@ -1220,7 +1205,6 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.runOnClient(mc -> {
       if (!baseline.equals(VerdictService.INSTANCE.analysis) || !VerdictService.INSTANCE.targets.isEmpty())
         throw new AssertionError("query deletion changed verdicts or did not delete");
-      VerdictService.INSTANCE.regions = new ArrayList<>();
       VerdictService.INSTANCE.changed();
       mc.gui.setScreen(null);
     });
@@ -1288,7 +1272,133 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       return mc.reloadResourcePacks();
     });
     c.waitFor(mc -> reloadEnglish.isDone() && mc.gui.overlay() == null, 600);
-    System.out.println("VV_SIGNATURE_PRODUCTS_PASS real multishot mismatch, four books, no signature, query UI CRUD, price and region filters, independent verdicts, exact replacement labels");
+    System.out.println("VV_SIGNATURE_PRODUCTS_PASS real multishot mismatch, four books, no signature, query UI CRUD, base-price filters, independent verdicts, exact replacement labels");
+  }
+
+  private void testSignatureDetails(ClientGameTestContext c, TestServerContext server) {
+    int originalScale = c.computeOnClient(mc -> mc.options.guiScale().get());
+    var ids = server.computeOnServer(s -> {
+      var result = new ArrayList<UUID>();
+      var registry = s.overworld().registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+      for (int i = 0; i < 5; i++) {
+        var v = new Villager(EntityTypes.VILLAGER, s.overworld());
+        v.setNoAi(true);
+        v.setPos(1 + i, -60, 1);
+        setProfession(v, i == 1 ? VillagerProfession.ARMORER
+            : i == 2 ? VillagerProfession.WEAPONSMITH : VillagerProfession.LIBRARIAN);
+        var offers = new MerchantOffers();
+        offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 1), new ItemStack(Items.BOOKSHELF), 12, 1, 0));
+        offers.add(new MerchantOffer(new ItemCost(Items.WHEAT_SEEDS, 20), new ItemStack(Items.EMERALD), 12, 1, 0));
+        if (i < 3) {
+          for (int n = 0; n < (i == 0 ? 3 : 1); n++) {
+            var item = new ItemStack(i == 0 ? Items.ENCHANTED_BOOK : i == 1 ? Items.DIAMOND_CHESTPLATE : Items.DIAMOND_SWORD);
+            var enchantment = i == 2 ? net.minecraft.world.item.enchantment.Enchantments.SHARPNESS
+                : net.minecraft.world.item.enchantment.Enchantments.PROTECTION;
+            int level = n == 0 ? 3 : 4;
+            net.minecraft.world.item.enchantment.EnchantmentHelper.updateEnchantments(item, ench -> {
+              ench.set(registry.getOrThrow(enchantment), level);
+              if (!item.is(Items.ENCHANTED_BOOK)) ench.set(registry.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.UNBREAKING), 3);
+            });
+            var offer = new MerchantOffer(new ItemCost(Items.EMERALD, 16 + n), item, 12, 1, 0);
+            offers.add(offer);
+          }
+          if (i == 1) offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 2), new ItemStack(Items.IRON_CHESTPLATE), 12, 1, 0));
+          if (i == 2) offers.add(new MerchantOffer(new ItemCost(Items.EMERALD, 20), new ItemStack(Items.DIAMOND_AXE), 12, 1, 0));
+        }
+        v.setOffers(offers);
+        s.overworld().addFreshEntity(v);
+        result.add(v.getUUID());
+      }
+      return result;
+    });
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) != null));
+    c.runOnClient(mc -> VerdictService.INSTANCE.scan());
+    for (var id : ids.subList(0, 4)) captureTrades(c, id);
+    c.waitFor(mc -> !VerdictService.INSTANCE.analysisPending());
+    c.runOnClient(mc -> {
+      var record = VerdictService.INSTANCE.record(ids.getFirst());
+      var trades = cn.ericcraft.villagerverdict.analysis.ProfessionHighlights.trades(record);
+      if (trades.size() != 3 || record.snapshot().trades().size() != 5)
+        throw new AssertionError("signature filtering lost complete offers or distinct books");
+      for (int actualPrice : new int[] {1, 40}) {
+        var original = trades.getFirst();
+        var cost = ItemCodecAdapter.encode(new ItemStack(Items.EMERALD, actualPrice));
+        var modified = new Trade(original.baseInput(), cost, original.secondInput(), original.output(), 12, 12);
+        if (!ClientDisplayText.signatureTradeSummary(original).equals(ClientDisplayText.signatureTradeSummary(modified)))
+          throw new AssertionError("actual price or stock leaked into base-price summary");
+      }
+      var carrots = ItemCodecAdapter.encode(new ItemStack(Items.GOLDEN_CARROT, 3));
+      var emeralds = ItemCodecAdapter.encode(new ItemStack(Items.EMERALD, 5));
+      String stackSummary = ClientDisplayText.signatureTradeSummary(new Trade(emeralds, emeralds, null, carrots, 0, 12));
+      if (!stackSummary.contains("×3") || !stackSummary.contains("5"))
+        throw new AssertionError("stack count or per-offer base price lost");
+    });
+    for (String language : List.of("en_us", "zh_cn")) {
+      var reload = c.computeOnClient(mc -> {
+        mc.getLanguageManager().setSelected(language);
+        mc.options.languageCode = language;
+        return mc.reloadResourcePacks();
+      });
+      c.waitFor(mc -> reload.isDone() && mc.gui.overlay() == null, 600);
+      for (int scale : new int[] {1, 2}) {
+        for (int i = 0; i < ids.size(); i++) {
+          final int index = i;
+          c.runOnClient(mc -> {
+            mc.options.guiScale().set(scale);
+            mc.resizeGui();
+            var screen = new VerdictScreen();
+            VerdictService.INSTANCE.selected = ids.get(index);
+            mc.gui.setScreen(screen);
+            if (screen.width < 640) {
+              try {
+                var field = VerdictScreen.class.getDeclaredField("mobileDetailView");
+                field.setAccessible(true);
+                field.setBoolean(screen, true);
+                screen.resize(screen.width, screen.height);
+              } catch (ReflectiveOperationException e) { throw new AssertionError(e); }
+            }
+            if (((String[]) privateField(screen, "TABS")).length != 2)
+              throw new AssertionError("unexpected management tab");
+            var state = new net.minecraft.client.renderer.state.gui.GuiRenderState();
+            screen.extractRenderState(new net.minecraft.client.gui.GuiGraphicsExtractor(mc, state, -1, -1), -1, -1, 0);
+            var text = new StringBuilder();
+            state.forEachText(line -> {
+              if (line.scissor == null) return;
+              var chars = (net.minecraft.util.FormattedCharSequence) privateField(line, "text");
+              chars.accept((position, style, codepoint) -> { text.appendCodePoint(codepoint); return true; });
+            });
+            String drawn = text.toString().replace(" ", "");
+            var record = VerdictService.INSTANCE.record(ids.get(index));
+            var selected = cn.ericcraft.villagerverdict.analysis.ProfessionHighlights.trades(record);
+            for (var trade : selected) {
+              String expected = ClientDisplayText.signatureTradeSummary(trade).replace(" ", "");
+              if (!drawn.contains(expected)) throw new AssertionError("missing rendered signature row: " + expected + " in " + drawn);
+            }
+            if (drawn.contains(ClientDisplayText.itemDisplayName("minecraft:bookshelf").replace(" ", ""))
+                || drawn.contains(ClientDisplayText.itemDisplayName("minecraft:wheat_seeds").replace(" ", "")))
+              throw new AssertionError("ordinary offers leaked into details");
+            String emptyKey = index == 4 ? "vv.uninspected" : "vv.detail.noSignatureTrades";
+            if (selected.isEmpty() && !drawn.contains(net.minecraft.network.chat.Component.translatable(emptyKey).getString().replace(" ", "")))
+              throw new AssertionError("missing empty/unscanned hint");
+          });
+          if (i < 4) c.takeScreenshot("signature-details-" + language + "-" + scale + "-" + i);
+        }
+      }
+    }
+    c.runOnClient(mc -> {
+      mc.gui.setScreen(null);
+      mc.options.guiScale().set(originalScale);
+      mc.resizeGui();
+    });
+    server.runOnServer(s -> ids.forEach(id -> s.overworld().getEntity(id).discard()));
+    c.waitFor(mc -> ids.stream().allMatch(id -> mc.level.getEntity(id) == null));
+    var reload = c.computeOnClient(mc -> {
+      mc.getLanguageManager().setSelected("en_us");
+      mc.options.languageCode = "en_us";
+      return mc.reloadResourcePacks();
+    });
+    c.waitFor(mc -> reload.isDone() && mc.gui.overlay() == null, 600);
+    System.out.println("VV_SIGNATURE_DETAILS_PASS base prices, distinct levels and prices, diamond gear, full snapshots, empty/unscanned hints, English/Chinese wide/narrow rendering");
   }
 
   private void testNavigation(ClientGameTestContext c, TestServerContext server) {
@@ -1679,7 +1789,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.takeScreenshot("transparent-details-" + locale);
     c.clickScreenButton("vv.backToList");
 
-    for (String page : List.of("vv.targets", "vv.regions")) {
+    for (String page : List.of("vv.targets")) {
       c.clickScreenButton(page);
       c.runOnClient(this::assertTransparent);
       c.takeScreenshot("transparent-" + page.substring(3) + "-" + locale);
@@ -2453,6 +2563,6 @@ public class ClientIntegrationTest implements FabricClientGameTest {
   }
 
   private WorldData withIdentity(WorldData source, WorldIdentity identity) {
-    return new WorldData(4, identity, source.cachedTrades(), source.targets(), source.regions());
+    return new WorldData(5, identity, source.cachedTrades(), source.targets());
   }
 }

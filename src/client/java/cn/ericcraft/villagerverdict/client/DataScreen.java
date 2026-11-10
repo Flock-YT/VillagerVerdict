@@ -10,7 +10,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 
-/** Lists persisted worlds and clears villager records without removing targets, regions, or settings. */
+/** Lists persisted worlds and clears villager records without removing targets or settings. */
 public final class DataScreen extends WorldScreen {
     private final Screen parent;
     private final VerdictService service = VerdictService.INSTANCE;
