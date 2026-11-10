@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -15,12 +16,13 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantment;
 
 /** Beginner-friendly editor for wanted trades with searchable Chinese/English item & enchantment pickers. */
 public final class TargetEditorScreen extends WorldScreen {
@@ -32,7 +34,7 @@ public final class TargetEditorScreen extends WorldScreen {
 
     private record ItemOption(String id, String displayName, ItemStack stack, boolean popular) {}
 
-    private record EnchantOption(String id, String displayName, int maxLevel, boolean supported) {}
+    private record EnchantOption(String id, String displayName, int maxLevel) {}
 
     private static final List<String> POPULAR_ITEMS = List.of(
         "minecraft:enchanted_book",
@@ -112,6 +114,9 @@ public final class TargetEditorScreen extends WorldScreen {
 
     @Override
     protected void init() {
+        priceBox = null;
+        normalizeEnchantment();
+        if (mode == Mode.PICK_ENCHANT && !canChooseEnchantment()) mode = Mode.FORM;
         if (mode == Mode.FORM) initForm();
         else if (mode == Mode.PICK_ITEM) initItemPicker();
         else initEnchantPicker();
@@ -139,6 +144,62 @@ public final class TargetEditorScreen extends WorldScreen {
             .bounds(innerX + 22, 39, innerW - 22, 20)
             .build());
 
+        if (canChooseEnchantment()) initEnchantmentControls(innerX, innerW);
+
+        int priceY = priceY();
+        boolean unlimited = parseMaxPriceOrDefault() == 0.0;
+        var unlimitedBtn = addRenderableWidget(Button.builder(
+                Component.literal((unlimited ? "● " : "")
+                    + Component.translatable(
+                        unlimited ? "vv.targetEditor.priceUnlimited" : "vv.targetEditor.priceLimited").getString())
+                    .withColor(unlimited ? 0xFF55DD88 : 0xFFE6EDF7),
+                ignored -> {
+                    syncPriceBox();
+                    maxPriceText = unlimited ? "16" : "0";
+                    rebuildWidgets();
+                })
+            .bounds(innerX + innerW - 144, priceY, 80, 20)
+            .build());
+        unlimitedBtn.setTooltip(Tooltip.create(Component.translatable("vv.targetEditor.priceHint")));
+
+        priceBox = new EditBox(font, innerX + innerW - 60, priceY, 60, 20, priceLabel());
+        priceBox.setMaxLength(12);
+        priceBox.setValue(maxPriceText);
+        priceBox.setHint(Component.translatable("vv.targetEditor.priceHint"));
+        priceBox.setTooltip(Tooltip.create(Component.translatable("vv.targetEditor.priceHint")));
+        priceBox.setResponder(v -> {
+            maxPriceText = v;
+            error = "";
+        });
+        addRenderableWidget(priceBox);
+
+        int footerY = height - 26;
+        addRenderableWidget(Button.builder(Component.translatable("vv.save"), ignored -> saveAndClose())
+            .bounds(px, footerY, 84, 20)
+            .build());
+        addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), ignored -> onClose())
+            .bounds(px + 90, footerY, 80, 20)
+            .build());
+        if (editing && onDelete != null) {
+            addRenderableWidget(Button.builder(Component.translatable("vv.delete"), ignored -> {
+                    onDelete.run();
+                    onClose();
+                })
+                .bounds(px + pw - 80, footerY, 80, 20)
+                .build());
+        }
+    }
+
+    private int priceY() {
+        return canChooseEnchantment() ? 126 : 74;
+    }
+
+    private Component priceLabel() {
+        return Component.translatable(canChooseEnchantment()
+            ? "vv.targetEditor.priceLabel" : "vv.targetEditor.priceLabelPlain");
+    }
+
+    private void initEnchantmentControls(int innerX, int innerW) {
         int clearW = 54;
         String enchText = enchantmentId.isBlank()
             ? Component.translatable("vv.targetEditor.anyEnchant").getString()
@@ -198,49 +259,6 @@ public final class TargetEditorScreen extends WorldScreen {
             .build());
         minusLvl.active = !enchantmentId.isBlank() && minLevel > 1;
         plusLvl.active = !enchantmentId.isBlank() && minLevel < maxLevel;
-
-        boolean unlimited = parseMaxPriceOrDefault() == 0.0;
-        var unlimitedBtn = addRenderableWidget(Button.builder(
-                Component.literal((unlimited ? "● " : "")
-                    + Component.translatable(
-                        unlimited ? "vv.targetEditor.priceUnlimited" : "vv.targetEditor.priceLimited").getString())
-                    .withColor(unlimited ? 0xFF55DD88 : 0xFFE6EDF7),
-                ignored -> {
-                    syncPriceBox();
-                    maxPriceText = unlimited ? "16" : "0";
-                    rebuildWidgets();
-                })
-            .bounds(innerX + innerW - 144, 126, 80, 20)
-            .build());
-        unlimitedBtn.setTooltip(Tooltip.create(Component.translatable("vv.targetEditor.priceHint")));
-
-        priceBox = new EditBox(font, innerX + innerW - 60, 126, 60, 20,
-            Component.translatable("vv.targetEditor.priceLabel"));
-        priceBox.setMaxLength(12);
-        priceBox.setValue(maxPriceText);
-        priceBox.setHint(Component.translatable("vv.targetEditor.priceHint"));
-        priceBox.setTooltip(Tooltip.create(Component.translatable("vv.targetEditor.priceHint")));
-        priceBox.setResponder(v -> {
-            maxPriceText = v;
-            error = "";
-        });
-        addRenderableWidget(priceBox);
-
-        int footerY = height - 26;
-        addRenderableWidget(Button.builder(Component.translatable("vv.save"), ignored -> saveAndClose())
-            .bounds(px, footerY, 84, 20)
-            .build());
-        addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), ignored -> onClose())
-            .bounds(px + 90, footerY, 80, 20)
-            .build());
-        if (editing && onDelete != null) {
-            addRenderableWidget(Button.builder(Component.translatable("vv.delete"), ignored -> {
-                    onDelete.run();
-                    onClose();
-                })
-                .bounds(px + pw - 80, footerY, 80, 20)
-                .build());
-        }
     }
 
     private void initItemPicker() {
@@ -379,19 +397,6 @@ public final class TargetEditorScreen extends WorldScreen {
                 .bounds(innerX, rowY, innerW, 20)
                 .build());
         }
-        if (options.isEmpty() && pickerQuery.contains(":")) {
-            String raw = pickerQuery.trim();
-            addRenderableWidget(Button.builder(
-                    Component.translatable("vv.targetEditor.useRawId", raw),
-                    ignored -> {
-                        enchantmentId = raw;
-                        minLevel = Math.max(1, minLevel);
-                        mode = Mode.FORM;
-                        rebuildWidgets();
-                    })
-                .bounds(innerX, listTop, innerW, 20)
-                .build());
-        }
     }
 
     private void selectItem(String id) {
@@ -428,26 +433,43 @@ public final class TargetEditorScreen extends WorldScreen {
     }
 
     private List<EnchantOption> filteredEnchantments() {
-        var mc = Minecraft.getInstance();
-        if (mc.level == null) return List.of();
         String q = pickerQuery.trim().toLowerCase(Locale.ROOT);
-        ItemStack chosen = ClientDisplayText.itemStack(itemId);
-        boolean checkSupport = !chosen.isEmpty() && !chosen.is(Items.ENCHANTED_BOOK);
         var list = new ArrayList<EnchantOption>();
-        mc.level.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).listElements().forEach(holder -> {
+        supportedEnchantments().forEach(holder -> {
             String id = holder.getRegisteredName();
             String name = holder.value().description().getString();
             if (q.isEmpty()
                     || name.toLowerCase(Locale.ROOT).contains(q)
                     || id.toLowerCase(Locale.ROOT).contains(q)) {
-                boolean supported = !checkSupport || holder.value().isSupportedItem(chosen);
-                list.add(new EnchantOption(id, name, Math.max(1, holder.value().getMaxLevel()), supported));
+                list.add(new EnchantOption(id, name, Math.max(1, holder.value().getMaxLevel())));
             }
         });
-        list.sort(Comparator
-            .comparing((EnchantOption o) -> !o.supported())
-            .thenComparing(EnchantOption::displayName));
+        list.sort(Comparator.comparing(EnchantOption::displayName));
         return list;
+    }
+
+    private Stream<Holder.Reference<Enchantment>> supportedEnchantments() {
+        var mc = Minecraft.getInstance();
+        ItemStack chosen = ClientDisplayText.itemStack(itemId);
+        if (mc.level == null || chosen.isEmpty()) return Stream.empty();
+        return mc.level.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).listElements()
+            .filter(holder -> chosen.is(Items.ENCHANTED_BOOK) || holder.value().isSupportedItem(chosen));
+    }
+
+    private boolean canChooseEnchantment() {
+        return supportedEnchantments().findAny().isPresent();
+    }
+
+    private void normalizeEnchantment() {
+        enchantmentId = enchantmentId.trim();
+        var selected = supportedEnchantments()
+            .filter(holder -> holder.getRegisteredName().equals(enchantmentId)).findFirst();
+        if (selected.isEmpty()) {
+            enchantmentId = "";
+            minLevel = 1;
+        } else {
+            minLevel = Math.clamp(minLevel, 1, Math.max(1, selected.get().value().getMaxLevel()));
+        }
     }
 
     private void syncPriceBox() {
@@ -467,6 +489,7 @@ public final class TargetEditorScreen extends WorldScreen {
 
     private void saveAndClose() {
         syncPriceBox();
+        normalizeEnchantment();
         try {
             if (itemId == null || itemId.isBlank()) throw new IllegalArgumentException("item");
             String trimmedPrice = maxPriceText == null || maxPriceText.isBlank() ? "0" : maxPriceText.trim();
@@ -504,9 +527,11 @@ public final class TargetEditorScreen extends WorldScreen {
             if (!preview.isEmpty()) {
                 g.item(preview, innerX, 41);
             }
-            g.text(font, Component.translatable("vv.targetEditor.enchantLabel"), innerX, 63, 0xFF9FB8D8);
-            g.text(font, Component.translatable("vv.targetEditor.levelLabel"), innerX, 106, 0xFFE6EDF7);
-            g.text(font, Component.translatable("vv.targetEditor.priceLabel"), innerX, 132, 0xFFE6EDF7);
+            if (canChooseEnchantment()) {
+                g.text(font, Component.translatable("vv.targetEditor.enchantLabel"), innerX, 63, 0xFF9FB8D8);
+                g.text(font, Component.translatable("vv.targetEditor.levelLabel"), innerX, 106, 0xFFE6EDF7);
+            }
+            g.text(font, priceLabel(), innerX, priceY() + 6, 0xFFE6EDF7);
 
             TargetTrade previewRule = new TargetTrade(
                 targetId,
@@ -516,7 +541,7 @@ public final class TargetEditorScreen extends WorldScreen {
                 parseMaxPriceOrDefault());
             String previewText = Component.translatable(
                 "vv.targetEditor.preview", ClientDisplayText.targetSummary(previewRule)).getString();
-            int py = 156;
+            int py = priceY() + 30;
             for (var line : font.split(Component.literal(previewText), innerW)) {
                 if (py < 24 + panelH - 10) {
                     g.text(font, line, innerX, py, 0xFF55DD88);

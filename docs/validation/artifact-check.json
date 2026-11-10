@@ -1,7 +1,7 @@
 {
   "artifact": "/Users/eric/Documents/IdeaProjects/VillagerVerdict/build/libs/VillagerVerdict-1.0.0.jar",
-  "bytes": 234954,
-  "sha256": "02e822d5693c4ee82be05803148e381d8155e96b0b9d1c4b43cc059113301424",
+  "bytes": 250715,
+  "sha256": "6bfec038baf41a17f7fcb01ea4879b3ea5a25baff685a0e8a73235ac3d0bed6c",
   "metadata": {
     "schemaVersion": 1,
     "id": "villagerverdict",
@@ -49,7 +49,9 @@
     "cn/ericcraft/villagerverdict/client/DataScreen.class",
     "cn/ericcraft/villagerverdict/client/ShortcutScreen.class",
     "cn/ericcraft/villagerverdict/client/ShortcutManager.class",
-    "cn/ericcraft/villagerverdict/storage/ShortcutBindings.class"
+    "cn/ericcraft/villagerverdict/storage/ShortcutBindings.class",
+    "cn/ericcraft/villagerverdict/client/TargetEditorScreen.class",
+    "cn/ericcraft/villagerverdict/client/VerdictScreen$DeleteTargetButton.class"
   ],
   "client_mixins": [
     "ClientPacketListenerMixin",

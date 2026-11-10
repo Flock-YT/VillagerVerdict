@@ -10,6 +10,10 @@ import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.fabric.api.client.gametest.v1.*;
 import net.fabricmc.fabric.api.client.gametest.v1.context.*;
 import net.minecraft.client.gui.screens.inventory.*;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.npc.villager.*;
@@ -47,6 +51,7 @@ public class ClientIntegrationTest implements FabricClientGameTest {
       testReplacementSearch(c, server);
       testSignatureProducts(c, server);
       testSignatureDetails(c, server);
+      testProductEditingAndDeletion(c);
       testContinuousThreeStates(c, server, connection);
       UUID id =
           server.computeOnServer(
@@ -1403,6 +1408,265 @@ public class ClientIntegrationTest implements FabricClientGameTest {
     c.waitFor(mc -> reload.isDone() && mc.gui.overlay() == null, 600);
     testLibrarianBooksTab(c, server);
     System.out.println("VV_SIGNATURE_DETAILS_PASS base prices, distinct levels and prices, diamond gear, full snapshots, empty/unscanned hints, English/Chinese wide/narrow rendering");
+  }
+
+  private void testProductEditingAndDeletion(ClientGameTestContext c) {
+    var originalTargets = c.computeOnClient(mc -> List.copyOf(VerdictService.INSTANCE.targets));
+    int originalScale = c.computeOnClient(mc -> mc.options.guiScale().get());
+    var saved = new ArrayList<TargetTrade>();
+    c.runOnClient(mc -> {
+      mc.options.guiScale().set(1);
+      mc.resizeGui();
+      mc.gui.setScreen(new TargetEditorScreen(new VerdictScreen(), null, saved::add, null));
+      targetInput(mc.gui.screen()).setValue("23.5");
+    });
+    chooseTargetEnchantment(c, "minecraft:protection");
+    for (int i = 0; i < 3; i++) c.clickScreenButton("+");
+    chooseTargetItem(c, "minecraft:diamond_chestplate");
+    assertTargetEnchantment(c, "minecraft:protection", 4, true);
+    chooseTargetItem(c, "minecraft:diamond_sword");
+    assertTargetEnchantment(c, "", 1, true);
+    chooseTargetEnchantment(c, "minecraft:sharpness");
+    for (int i = 0; i < 4; i++) c.clickScreenButton("+");
+    chooseTargetItem(c, "minecraft:enchanted_book");
+    assertTargetEnchantment(c, "minecraft:sharpness", 5, true);
+    chooseTargetEnchantment(c, "minecraft:mending");
+    assertTargetEnchantment(c, "minecraft:mending", 1, true);
+    chooseTargetItem(c, "minecraft:bow");
+    assertTargetEnchantment(c, "minecraft:mending", 1, true);
+    openTargetEnchantPicker(c);
+    for (String unsupported : List.of("minecraft:sharpness", "test:unknown_enchantment")) {
+      setTargetPickerQuery(c, unsupported);
+      c.runOnClient(mc -> {
+        if (screenButtons(mc.gui.screen()).stream().anyMatch(b -> b.getY() >= 56))
+          throw new AssertionError("unsupported/raw enchantment offered for bow: " + unsupported);
+      });
+    }
+    c.clickScreenButton("vv.targetEditor.backToForm");
+    chooseTargetEnchantment(c, "minecraft:power");
+    for (int i = 0; i < 4; i++) c.clickScreenButton("+");
+    assertTargetEnchantment(c, "minecraft:power", 5, true);
+    chooseTargetItem(c, "minecraft:glass");
+    assertTargetEnchantment(c, "", 1, false);
+    c.runOnClient(mc -> {
+      var input = targetInput(mc.gui.screen());
+      if (!input.getValue().equals("23.5") || input.getY() != 74)
+        throw new AssertionError("item switching lost price or did not compact ordinary item form");
+      String text = renderedScreenText(mc);
+      if (!text.contains(Component.translatable("vv.targetEditor.priceLabelPlain").getString())
+          || text.contains(Component.translatable("vv.targetEditor.enchantLabel").getString())
+          || text.contains("Power"))
+        throw new AssertionError("ordinary item preview/labels contain stale enchantment");
+    });
+    c.clickScreenButton("vv.save");
+    c.runOnClient(mc -> {
+      var target = saved.getFirst();
+      if (!target.item().equals("minecraft:glass") || !target.enchantment().isEmpty()
+          || target.minLevel() != 0 || target.maxUnitPrice() != 23.5)
+        throw new AssertionError("ordinary item saved stale enchantment or lost price");
+    });
+
+    var fixtures = List.of(
+        new TargetTrade("delete-glass", "minecraft:glass", "", 0, 4),
+        new TargetTrade("delete-book", "minecraft:enchanted_book", "minecraft:mending", 1, 16),
+        new TargetTrade("delete-armor", "minecraft:diamond_chestplate", "minecraft:protection", 4, 24));
+    for (String language : List.of("en_us", "zh_cn")) {
+      var reload = c.computeOnClient(mc -> {
+        mc.getLanguageManager().setSelected(language);
+        mc.options.languageCode = language;
+        return mc.reloadResourcePacks();
+      });
+      c.waitFor(mc -> reload.isDone() && mc.gui.overlay() == null, 600);
+      for (int scale : new int[] {1, 2}) {
+        c.runOnClient(mc -> {
+          mc.options.guiScale().set(scale);
+          mc.resizeGui();
+          VerdictService.INSTANCE.targets = new ArrayList<>(fixtures);
+          VerdictService.INSTANCE.changed();
+          mc.gui.setScreen(new VerdictScreen());
+        });
+        c.clickScreenButton("vv.targets");
+        c.runOnClient(mc -> {
+          var screen = mc.gui.screen();
+          for (var t : fixtures) {
+            var trash = screenButtons(screen).stream().filter(b -> b.getMessage().getString()
+                .equals(Component.translatable("vv.target.delete", ClientDisplayText.targetSummary(t)).getString()))
+                .findFirst().orElseThrow();
+            if (trash.getWidth() != 20 || trash.getHeight() != 20 || trash.getX() != screen.width - 32)
+              throw new AssertionError("incorrect trash button bounds");
+            var row = screenButtons(screen).stream().filter(b -> b.getY() == trash.getY())
+                .sorted(Comparator.comparingInt(Button::getX)).toList();
+            for (int i = 1; i < row.size(); i++) {
+              if (row.get(i - 1).getRight() + 4 > row.get(i).getX())
+                throw new AssertionError("product row controls overlap");
+            }
+            var narration = new net.minecraft.client.gui.narration.ScreenNarrationCollector();
+            narration.update(trash::updateNarration, net.minecraft.client.gui.narration.NarrationTrigger.KEYBOARD);
+            if (!narration.collectNarrationText(true).contains(trash.getMessage().getString()))
+              throw new AssertionError("trash narration does not identify product");
+          }
+        });
+        c.takeScreenshot("product-delete-" + language + "-" + scale);
+        clickButtonPrefix(c, ClientDisplayText.itemDisplayName(fixtures.getFirst().item()));
+        c.runOnClient(mc -> {
+          if (targetInput(mc.gui.screen()).getY() != 74) throw new AssertionError("glass layout not compact");
+        });
+        c.takeScreenshot("product-glass-" + language + "-" + scale);
+        c.clickScreenButton("gui.cancel");
+        clickButtonPrefix(c, ClientDisplayText.itemDisplayName(fixtures.getLast().item()));
+        c.takeScreenshot("product-armor-" + language + "-" + scale);
+        c.clickScreenButton("gui.cancel");
+        // Keep an active product filter while returning to delete that product.
+        c.clickScreenButton("vv.target.viewVillagers");
+        c.clickScreenButton("vv.targets");
+        deleteTargetFromList(c, fixtures.getFirst());
+        c.runOnClient(mc -> {
+          if (!(mc.gui.screen() instanceof VerdictScreen) || VerdictService.INSTANCE.targets.size() != 2
+              || !privateField(mc.gui.screen(), "productQueryId").equals(""))
+            throw new AssertionError("direct deletion opened a screen or left active filter");
+          mc.gui.setScreen(null);
+          mc.gui.setScreen(new VerdictScreen());
+        });
+        c.clickScreenButton("vv.targets");
+        deleteTargetFromList(c, fixtures.get(1));
+        assertPersistedTargets(c, List.of(fixtures.getLast()));
+        // The original editor deletion entry point still works.
+        clickButtonPrefix(c, ClientDisplayText.itemDisplayName(fixtures.getLast().item()));
+        c.clickScreenButton("vv.delete");
+        c.runOnClient(mc -> {
+          if (!VerdictService.INSTANCE.targets.isEmpty()) throw new AssertionError("editor deletion regressed");
+        });
+      }
+    }
+
+    c.runOnClient(mc -> {
+      var many = new ArrayList<TargetTrade>();
+      for (int i = 0; i < 24; i++) many.add(new TargetTrade("scroll-" + i, "minecraft:glass", "", 0, i + 1));
+      VerdictService.INSTANCE.targets = many;
+      VerdictService.INSTANCE.changed();
+      mc.gui.setScreen(new VerdictScreen());
+    });
+    c.clickScreenButton("vv.targets");
+    int bottomOffset = c.computeOnClient(mc -> {
+      for (int i = 0; i < 24; i++) mc.gui.screen().mouseScrolled(0, 0, 0, -1);
+      return (int) privateField(mc.gui.screen(), "offset");
+    });
+    if (bottomOffset <= 0) throw new AssertionError("scroll fixture did not overflow");
+    deleteTargetFromList(c, c.computeOnClient(mc -> VerdictService.INSTANCE.targets.getLast()));
+    c.runOnClient(mc -> {
+      if ((int) privateField(mc.gui.screen(), "offset") != bottomOffset - 1)
+        throw new AssertionError("deleting last row did not clamp scroll position");
+    });
+    while (c.computeOnClient(mc -> !VerdictService.INSTANCE.targets.isEmpty())) {
+      var next = c.computeOnClient(mc -> VerdictService.INSTANCE.targets.get((int) privateField(mc.gui.screen(), "offset")));
+      deleteTargetFromList(c, next);
+    }
+    c.runOnClient(mc -> {
+      if ((int) privateField(mc.gui.screen(), "offset") != 0
+          || !renderedScreenText(mc).replace(" ", "").contains(Component.translatable("vv.emptyTargets").getString().replace(" ", "")))
+        throw new AssertionError("deleting all rows did not show empty state");
+    });
+    assertPersistedTargets(c, List.of());
+    c.takeScreenshot("product-delete-empty-zh_cn");
+    c.runOnClient(mc -> {
+      VerdictService.INSTANCE.targets = new ArrayList<>(originalTargets);
+      VerdictService.INSTANCE.changed();
+      mc.gui.setScreen(null);
+      mc.options.guiScale().set(originalScale);
+      mc.resizeGui();
+    });
+    var reload = c.computeOnClient(mc -> {
+      mc.getLanguageManager().setSelected("en_us");
+      mc.options.languageCode = "en_us";
+      return mc.reloadResourcePacks();
+    });
+    c.waitFor(mc -> reload.isDone() && mc.gui.overlay() == null && !VerdictService.INSTANCE.analysisPending(), 600);
+    System.out.println("VV_PRODUCT_CONTROLS_PASS item support, filtered IDs, level limits, price preservation, direct/editor deletion, active filter cleanup, scroll clamping, persistence, bilingual wide/narrow layouts");
+  }
+
+  private static List<Button> screenButtons(Screen screen) {
+    return screen.children().stream().filter(Button.class::isInstance).map(Button.class::cast).toList();
+  }
+
+  private static EditBox targetInput(Screen screen) {
+    return screen.children().stream().filter(EditBox.class::isInstance).map(EditBox.class::cast).findFirst().orElseThrow();
+  }
+
+  private void setTargetPickerQuery(ClientGameTestContext c, String query) {
+    c.runOnClient(mc -> targetInput(mc.gui.screen()).setValue(query));
+    c.waitTicks(1);
+  }
+
+  private void chooseTargetItem(ClientGameTestContext c, String id) {
+    clickButtonContaining(c, Component.translatable("vv.targetEditor.changeItem").getString());
+    setTargetPickerQuery(c, id);
+    clickButtonPrefix(c, ClientDisplayText.itemDisplayName(id));
+  }
+
+  private void openTargetEnchantPicker(ClientGameTestContext c) {
+    c.runOnClient(mc -> screenButtons(mc.gui.screen()).stream()
+        .filter(b -> b.getY() == 74 && b.getWidth() > 54).findFirst().orElseThrow()
+        .onPress(new net.minecraft.client.input.MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0)));
+  }
+
+  private void chooseTargetEnchantment(ClientGameTestContext c, String id) {
+    openTargetEnchantPicker(c);
+    setTargetPickerQuery(c, id);
+    clickButtonPrefix(c, c.computeOnClient(mc -> ClientDisplayText.enchantmentDisplayName(id)));
+  }
+
+  private void assertTargetEnchantment(ClientGameTestContext c, String id, int level, boolean visible) {
+    c.runOnClient(mc -> {
+      var screen = mc.gui.screen();
+      if (!privateField(screen, "enchantmentId").equals(id) || (int) privateField(screen, "minLevel") != level)
+        throw new AssertionError("incorrect selected enchantment/level: " + id + " " + level);
+      var levelButtons = screenButtons(screen).stream().filter(b -> b.getY() == 100).toList();
+      if (levelButtons.size() != (visible ? 3 : 0)) throw new AssertionError("incorrect enchantment control visibility");
+      for (var b : levelButtons) {
+        String label = b.getMessage().getString();
+        boolean expected = !id.isEmpty() && (label.equals("-") && level > 1
+            || label.equals("+") && level < ClientDisplayText.enchantmentMaxLevel(id));
+        if (b.active != expected) throw new AssertionError("incorrect level control bounds");
+      }
+    });
+  }
+
+  private void deleteTargetFromList(ClientGameTestContext c, TargetTrade target) {
+    c.runOnClient(mc -> {
+      var screen = mc.gui.screen();
+      String label = Component.translatable("vv.target.delete", ClientDisplayText.targetSummary(target)).getString();
+      var button = screenButtons(screen).stream().filter(b -> b.getMessage().getString().equals(label)).findFirst().orElseThrow();
+      var event = new net.minecraft.client.input.MouseButtonEvent(button.getX() + 10, button.getY() + 10,
+          new net.minecraft.client.input.MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0));
+      if (!screen.mouseClicked(event, false)) throw new AssertionError("trash button rejected click");
+      screen.mouseReleased(event);
+      if (mc.gui.screen() != screen || VerdictService.INSTANCE.targets.stream().anyMatch(t -> t.id().equals(target.id())))
+        throw new AssertionError("trash click did not delete exactly its product in place");
+    });
+  }
+
+  private void assertPersistedTargets(ClientGameTestContext c, List<TargetTrade> expected) {
+    var catalog = c.computeOnClient(mc -> VerdictService.INSTANCE.storedWorlds());
+    c.waitFor(mc -> catalog.isDone());
+    catalog.join();
+    var identity = c.computeOnClient(mc -> VerdictService.INSTANCE.identity());
+    Path path = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir()
+        .resolve("villagerverdict/worlds/" + JsonStore.fileKey(identity) + ".json");
+    try (var store = new JsonStore(e -> { throw new AssertionError(e); })) {
+      var data = store.read(path, WorldData.class, () -> null).join();
+      if (data == null || !data.targets().equals(expected)) throw new AssertionError("deleted products returned after storage reload");
+    }
+  }
+
+  private String renderedScreenText(net.minecraft.client.Minecraft mc) {
+    var state = new net.minecraft.client.renderer.state.gui.GuiRenderState();
+    mc.gui.screen().extractRenderState(new net.minecraft.client.gui.GuiGraphicsExtractor(mc, state, -1, -1), -1, -1, 0);
+    var text = new StringBuilder();
+    state.forEachText(line -> {
+      var chars = (net.minecraft.util.FormattedCharSequence) privateField(line, "text");
+      chars.accept((position, style, codepoint) -> { text.appendCodePoint(codepoint); return true; });
+    });
+    return text.toString();
   }
 
   private void testLibrarianBooksTab(ClientGameTestContext c, TestServerContext server) {

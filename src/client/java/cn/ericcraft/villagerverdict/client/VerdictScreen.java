@@ -91,6 +91,28 @@ public final class VerdictScreen extends WorldScreen {
 
     private record Guide(String text, int color) {}
 
+    private static final class DeleteTargetButton extends Button {
+        private DeleteTargetButton(int x, int y, String summary, OnPress onPress) {
+            super(x, y, 20, 20, Component.translatable("vv.target.delete", summary), onPress, DEFAULT_NARRATION);
+            setTooltip(Tooltip.create(getMessage()));
+        }
+
+        @Override
+        protected void extractContents(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
+            extractDefaultSprite(g);
+            int x = getX() + 5;
+            int y = getY() + 4;
+            int color = isHoveredOrFocused() ? 0xFFFF6677 : 0xFFE6EDF7;
+            g.fill(x + 3, y, x + 7, y + 1, color);
+            g.fill(x, y + 2, x + 10, y + 3, color);
+            g.fill(x + 1, y + 4, x + 2, y + 11, color);
+            g.fill(x + 8, y + 4, x + 9, y + 11, color);
+            g.fill(x + 1, y + 11, x + 9, y + 12, color);
+            g.fill(x + 4, y + 5, x + 5, y + 10, color);
+            g.fill(x + 6, y + 5, x + 7, y + 10, color);
+        }
+    }
+
     public VerdictScreen() {
         super(Component.translatable("vv.title"));
     }
@@ -351,17 +373,19 @@ public final class VerdictScreen extends WorldScreen {
         int rows = Math.max(1, (height - top - 32) / 24);
         offset = Math.clamp(offset, 0, Math.max(0, targets.size() - rows));
         int viewW = Math.min(110, font.width(Component.translatable("vv.target.viewVillagers")) + 16);
+        int deleteX = width - 12 - 20;
+        int viewX = deleteX - 4 - viewW;
         for (int i = offset; i < Math.min(targets.size(), offset + rows); i++) {
             var t = targets.get(i);
             int rowY = top + (i - offset) * 24;
             String summary = ClientDisplayText.targetSummary(t);
-            int mainW = width - 24 - 22 - viewW - 4;
+            int mainW = viewX - 4 - 34;
             var row = button(
                 Component.literal(font.plainSubstrByWidth(summary, mainW - 10)),
                 34, rowY, mainW,
                 () -> openTargetEditor(t));
             row.setTooltip(Tooltip.create(Component.translatable("vv.target.editHint")));
-            var view = button(Component.translatable("vv.target.viewVillagers"), width - 12 - viewW, rowY, viewW, () -> {
+            var view = button(Component.translatable("vv.target.viewVillagers"), viewX, rowY, viewW, () -> {
                 productQueryId = t.id();
                 adHocProductQuery = null;
                 page = 0;
@@ -373,6 +397,10 @@ public final class VerdictScreen extends WorldScreen {
                 rebuildWidgets();
             });
             view.setTooltip(Tooltip.create(Component.translatable("vv.target.viewVillagers.help")));
+            addRenderableWidget(new DeleteTargetButton(deleteX, rowY, summary, ignored -> {
+                updateTarget(t.id(), null);
+                rebuildWidgets();
+            }));
         }
     }
 
